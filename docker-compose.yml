@@ -1,0 +1,138 @@
+# =========================================================================
+# urban-script-reservation  中间件 Docker Compose
+# -------------------------------------------------------------------------
+# 资源全部为新项目服务（旧项目容器已全部清理）
+#   - MySQL 8.0  : 3306（新项目专用，root 密码 123456）
+#   - Redis 7    : 6379（无密码，新项目用 DB 1）
+#   - Nacos 2.4.0: 8848/9848（nacos/nacos）
+#   - RabbitMQ 3.13 + delayed_message 插件: 5672 / 15672 (guest/guest)
+# =========================================================================
+
+services:
+  # ==========================================================
+  # MySQL 8.0（新项目专用）
+  #   端口: 3306
+  #   root 密码: 123456
+  #   字符集: utf8mb4_unicode_ci
+  #   说明: 初始化时不自动建库，建库建表通过 init-scripts/01-init.sql
+  #         用客户端执行：mysql -h127.0.0.1 -uroot -p123456 < init-scripts/01-init.sql
+  # ==========================================================
+  mysql:
+    image: mysql:8.0
+    container_name: urban-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: 123456
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=caching_sha2_password
+      - --max-connections=500
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ==========================================================
+  # Redis 7（新项目专用，Redis+Lua 原子扣减 + 分布式锁用）
+  #   端口: 6379
+  #   无密码，新项目业务逻辑用 DB 1
+  # ==========================================================
+  redis:
+    image: redis:7-alpine
+    container_name: urban-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    environment:
+      TZ: Asia/Shanghai
+    command:
+      - --appendonly yes
+      - --save 60 1
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ==========================================================
+  # Nacos 2.4.0 (standalone 单机模式)
+  #   端口: 8848 HTTP 控制台 / 9848 gRPC 内部通信
+  #   存储: 内嵌 Derby (standalone 默认), 不绑 MySQL
+  # ==========================================================
+  nacos:
+    image: nacos/nacos-server:v2.4.0
+    container_name: urban-nacos
+    restart: unless-stopped
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    environment:
+      - MODE=standalone
+      - PREFER_HOST_MODE=hostname
+      - NACOS_AUTH_ENABLE=false          # 开发环境关闭鉴权（避免 token.secret.key 配置问题）
+      - JVM_XMS=512m                     # 修复: 原 256m 导致新生代/最大堆冲突, 启动崩溃
+      - JVM_XMX=1024m
+      - JVM_XMN=256m
+      - TZ=Asia/Shanghai
+    volumes:
+      - nacos_data:/home/nacos/data
+      - nacos_logs:/home/nacos/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8848/nacos/v1/console/health/readiness"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 45s                  # Nacos 启动慢, 给足 45s 宽限期
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  # ==========================================================
+  # RabbitMQ 3.13 (management 控制台)
+  #   端口: 5672 AMQP  /  15672 Web 控制台 (guest/guest)
+  #   延迟消息方案: 死信队列 + TTL（RabbitMQ 原生，不需要额外插件）
+  #   delayed_message_exchange 插件（更灵活的延迟方案）后续手动安装：
+  #     docker exec urban-rabbitmq rabbitmq-plugins enable rabbitmq_delayed_message_exchange
+  # ==========================================================
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: urban-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      TZ: Asia/Shanghai
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:
+  redis_data:
+  nacos_data:
+  nacos_logs:
+  rabbitmq_data:

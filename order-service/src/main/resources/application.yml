@@ -1,0 +1,118 @@
+# =============================================================================
+# order-service 订单微服务配置
+# -----------------------------------------------------------------------------
+# 端口: 8084
+# 数据库: MySQL 3306, 库 urban_script_reservation (与 shop-service 共用)
+# Redis: 6379, database 1
+# RabbitMQ: 5672 (guest/guest)
+# Nacos: 127.0.0.1:8848
+# =============================================================================
+
+server:
+  port: 8084
+
+spring:
+  application:
+    name: order-service
+
+  # Spring Boot 3.x Config Data API（官方推荐）：通过 import 列表直接从 Nacos 拉多个 DataId。
+  # 规则：列表越靠后，属性优先级越高（能覆盖前面同名属性）。
+  #   1) {appName}.yaml      — 服务专用配置（优先级最低）
+  #   2) urban-shared.yaml   — 公共基础设施（MySQL/Redis 等各业务服务共用）
+  #   3) urban-shared-config — 敏感配置（JWT 密钥 / 内部 API Key，最高优先级，最后加载）
+  config:
+    import:
+      - "optional:nacos:order-service.yaml?group=DEFAULT_GROUP&refresh=true"
+      - "optional:nacos:urban-shared.yaml?group=DEFAULT_GROUP&refresh=true"
+      - "optional:nacos:urban-shared-config?group=DEFAULT_GROUP&refresh=true"
+
+  # -------------------- Cloud Nacos --------------------
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+        group: DEFAULT_GROUP
+        fail-fast: false
+      config:
+        server-addr: 127.0.0.1:8848
+        file-extension: yaml
+        enabled: true
+        # 共享配置（MySQL/Redis 等各业务服务共用）
+        shared-configs:
+          - data-id: urban-shared.yaml
+            group: DEFAULT_GROUP
+            refresh: true
+
+  # Sentinel —— P0 阶段关闭，agent-gateway 再开
+  sentinel:
+    enabled: false
+
+  # -------------------- MySQL --------------------
+  datasource:
+    url: jdbc:mysql://localhost:3306/urban_script_reservation?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # -------------------- Redis --------------------
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 1
+      timeout: 3000
+
+  # -------------------- RabbitMQ --------------------
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+    # 发布确认 + 返回机制 —— 确保延迟关单消息不丢
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 10
+
+# -------------------- Redisson --------------------
+# 显式单节点配置（starter 也会自动创建，这里指定参数更清晰）
+redisson:
+  single-server-config:
+    address: "redis://localhost:6379"
+    password: null
+    database: 1
+    connection-pool-size: 16
+    connection-minimum-idle-size: 4
+
+# -------------------- MyBatis-Plus --------------------
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      id-type: none
+
+# -------------------- Knife4j --------------------
+springdoc:
+  swagger-ui:
+    path: /doc.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+# -------------------- 业务自定义配置 --------------------
+# ⚠️ 敏感配置（JWT 密钥、内部 API Key）已迁移到 Nacos urban-shared-config DataId，
+#    本文件不再硬编码，避免提交到仓库泄漏。若 Nacos 不可达，
+#    InternalApiKeyFilter / InternalApiKeyInterceptor 内置兜底默认值保持兼容。
+
+# -------------------- 日志 --------------------
+logging:
+  level:
+    com.urban.script.order: DEBUG
+    com.alibaba.nacos: WARN
+    com.baomidou.mybatisplus: DEBUG

@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <!-- ========================================================================== -->
+    <!-- urban-script-reservation : 微服务父工程 (聚合 POM)                         -->
+    <!-- 技术栈: Java 17 | Spring Boot 3.2.5 | Spring Cloud 2023.0.1               -->
+    <!--         Spring Cloud Alibaba 2023.0.1.0                                   -->
+    <!-- ========================================================================== -->
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- 继承 Spring Boot 官方 starter-parent -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.urban.script</groupId>
+    <artifactId>urban-script-reservation</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+    <name>urban-script-reservation</name>
+    <description>脚本杀单预约平台 : 微服务父工程</description>
+
+    <!-- 子模块声明 -->
+    <modules>
+        <module>reservation-common</module>
+        <module>reservation-gateway</module>
+        <module>user-service</module>
+        <module>shop-service</module>
+        <module>order-service</module>
+        <module>agent-gateway</module>
+    </modules>
+
+    <!-- 版本属性 -->
+    <properties>
+        <java.version>17</java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <spring-cloud.version>2023.0.1</spring-cloud.version>
+        <spring-cloud-alibaba.version>2023.0.1.0</spring-cloud-alibaba.version>
+        <jjwt.version>0.12.6</jjwt.version>
+        <lombok.version>1.18.30</lombok.version>
+    </properties>
+
+    <!-- 版本锁定 (只锁版本，不传递依赖) -->
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Cloud 官方 BOM -->
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- Spring Cloud Alibaba BOM -->
+            <dependency>
+                <groupId>com.alibaba.cloud</groupId>
+                <artifactId>spring-cloud-alibaba-dependencies</artifactId>
+                <version>${spring-cloud-alibaba.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+
+            <!-- 公共模块自身 -->
+            <dependency>
+                <groupId>com.urban.script</groupId>
+                <artifactId>reservation-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <!-- jjwt 0.12.x 三件套 -->
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-api</artifactId>
+                <version>${jjwt.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-impl</artifactId>
+                <version>${jjwt.version}</version>
+                <scope>runtime</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.jsonwebtoken</groupId>
+                <artifactId>jjwt-jackson</artifactId>
+                <version>${jjwt.version}</version>
+                <scope>runtime</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>org.projectlombok</groupId>
+                <artifactId>lombok</artifactId>
+                <version>${lombok.version}</version>
+                <scope>provided</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <!-- 插件管理 -->
+    <build>
+        <pluginManagement>
+            <plugins>
+                <!-- Spring Boot 打包插件: 默认 skip, 有启动类的子模块显式开启 -->
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <configuration>
+                        <skip>true</skip>
+                    </configuration>
+                    <executions>
+                        <execution>
+                            <goals>
+                                <goal>repackage</goal>
+                            </goals>
+                        </execution>
+                    </executions>
+                </plugin>
+
+                <!-- Java 17 编译插件 (Lombok 作为注解处理器由 Spring Boot parent 默认处理) -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <source>17</source>
+                        <target>17</target>
+                        <encoding>UTF-8</encoding>
+                    </configuration>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>

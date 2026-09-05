@@ -1,0 +1,110 @@
+<html style="margin:0;padding:0;">
+<div style="background-color:transparent;box-sizing:border-box;font-family:'Segoe UI','PingFang SC','Microsoft YaHei',Arial,sans-serif;color:#1A1B1C;line-height:1.5;">
+  <div style="padding:4px 2px;box-sizing:border-box;">
+
+    <!-- 标题 -->
+    <div style="font-size:16px;font-weight:600;margin-bottom:2px;">Urban Script Reservation · 系统架构总览</div>
+    <div style="font-size:12px;color:#6B7280;margin-bottom:12px;">剧本杀预约平台 · 微服务架构（Java17 / Spring Cloud Alibaba / Redis+Lua / RabbitMQ / FastAPI Agent）</div>
+
+    <!-- 第 1 层：客户端 -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+      <div style="flex:1 1 140px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;">
+        <div style="font-size:13px;font-weight:600;">👤 玩家端</div>
+        <div style="font-size:11px;color:#6B7280;">注册/登录 · 抢场次 · 查订单 · AI 对话</div>
+      </div>
+      <div style="flex:1 1 140px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;">
+        <div style="font-size:13px;font-weight:600;">🏪 店长 / DM 端</div>
+        <div style="font-size:11px;color:#6B7280;">建店 · 建剧本 · 建场次 · 关场次</div>
+      </div>
+      <div style="flex:1 1 140px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;">
+        <div style="font-size:13px;font-weight:600;">🛠 压测 / 文档</div>
+        <div style="font-size:11px;color:#6B7280;">Postman · Knife4j · Node 并发脚本</div>
+      </div>
+    </div>
+
+    <!-- 第 2 层：网关 -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+      <div style="flex:1 1 300px;min-width:0;padding:10px 12px;background:linear-gradient(135deg,rgba(155,187,244,0.18),rgba(155,187,244,0.30));border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;">
+        <div style="font-size:13px;font-weight:600;">🛡 reservation-gateway <span style="color:#6B7280;font-weight:400;">(8081)</span></div>
+        <div style="font-size:11px;color:#4b5563;margin-top:2px;">Spring Cloud Gateway · 全局 JWT 鉴权（解析 token→注入 X-User-Id / X-User-Role）· 路由转发 · CORS</div>
+      </div>
+    </div>
+
+    <!-- 第 3 层：微服务 -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+      <div style="flex:1 1 150px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;">
+        <div style="font-size:13px;font-weight:600;">👤 user-service <span style="color:#6B7280;font-weight:400;">8082</span></div>
+        <div style="font-size:11px;color:#6B7280;margin-top:2px;">注册（BCrypt+唯一校验）· 登录签发 JWT · 手机号脱敏 · 角色（玩家/DM/店长/管理员）</div>
+      </div>
+      <div style="flex:1 1 150px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;">
+        <div style="font-size:13px;font-weight:600;">🏪 shop-service <span style="color:#6B7280;font-weight:400;">8083</span></div>
+        <div style="font-size:11px;color:#6B7280;margin-top:2px;">门店 / 剧本 / 场次 CRUD · DM 时段冲突检测 · 关场次（2h 前限制）→ 发 MQ 批量取消</div>
+      </div>
+      <div style="flex:1 1 150px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;">
+        <div style="font-size:13px;font-weight:600;">🎫 order-service <span style="color:#6B7280;font-weight:400;">8084</span></div>
+        <div style="font-size:11px;color:#6B7280;margin-top:2px;">下单（Redisson 锁→Feign 校验→Redis+Lua 扣减→建单→MQ 延迟关单）· 取消双重重回滚 · 超时/关场批量取消</div>
+      </div>
+      <div style="flex:1 1 150px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;">
+        <div style="font-size:13px;font-weight:600;">🤖 agent-gateway <span style="color:#6B7280;font-weight:400;">8085</span></div>
+        <div style="font-size:11px;color:#6B7280;margin-top:2px;">AI 对话入口（透传 Python Agent）· 内部接口（订单/剧本，内部 API Key 鉴权）· Feign fallback</div>
+      </div>
+    </div>
+
+    <!-- 第 4 层：Python Agent -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+      <div style="flex:1 1 300px;min-width:0;padding:10px 12px;background:linear-gradient(135deg,rgba(163,213,232,0.18),rgba(163,213,232,0.30));border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;">
+        <div style="font-size:13px;font-weight:600;">🐍 python-agent <span style="color:#6B7280;font-weight:400;">8000</span> · FastAPI + LangGraph</div>
+        <div style="font-size:11px;color:#4b5563;margin-top:2px;">意图识别（查单/找本/我的订单/引导/闲聊）→ 工具调用（回调 agent-gateway 内部接口）→ 自然语言回复 · Redis 会话记忆</div>
+      </div>
+    </div>
+
+    <!-- 第 5 层：中间件 -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+      <div style="flex:1 1 130px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;text-align:center;">
+        <div style="font-size:13px;font-weight:600;">🗂 MySQL 8.0 <span style="color:#6B7280;font-weight:400;">3306</span></div>
+        <div style="font-size:11px;color:#6B7280;">user / shop / script / session / order</div>
+      </div>
+      <div style="flex:1 1 130px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;text-align:center;">
+        <div style="font-size:13px;font-weight:600;">⚡ Redis 7 <span style="color:#6B7280;font-weight:400;">6379</span></div>
+        <div style="font-size:11px;color:#6B7280;">Lua 原子扣减/回滚 · Redisson 锁 · Agent 会话记忆</div>
+      </div>
+      <div style="flex:1 1 130px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;text-align:center;">
+        <div style="font-size:13px;font-weight:600;">🐰 RabbitMQ 3.13 <span style="color:#6B7280;font-weight:400;">5672</span></div>
+        <div style="font-size:11px;color:#6B7280;">延迟关单 TTL+DLX · 关场次批量取消</div>
+      </div>
+      <div style="flex:1 1 130px;min-width:0;padding:10px 12px;background:#FFFFFF;border:1px solid rgba(0,0,0,0.08);border-radius:12px;box-sizing:border-box;text-align:center;">
+        <div style="font-size:13px;font-weight:600;">🌐 Nacos 2.4.0 <span style="color:#6B7280;font-weight:400;">8848</span></div>
+        <div style="font-size:11px;color:#6B7280;">服务注册发现 · 配置中心（JWT 密钥/内部 Key）</div>
+      </div>
+    </div>
+
+    <!-- 关键链路图例 -->
+    <div style="font-size:12px;color:#6B7280;margin-bottom:6px;">核心业务链路：</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+      <div style="flex:1 1 220px;min-width:0;padding:8px 10px;background:rgba(82,196,26,0.08);border-left:3px solid #52C41A;border-radius:6px;box-sizing:border-box;">
+        <div style="font-size:12px;font-weight:600;">① 高并发抢位</div>
+        <div style="font-size:11px;color:#6B7280;">Redisson 锁 → Redis+Lua 原子扣减（SHA1 预加载/懒加载/动态 TTL）→ MySQL 最终一致 → 2000 并发零冲突、无超卖</div>
+      </div>
+      <div style="flex:1 1 220px;min-width:0;padding:8px 10px;background:rgba(250,173,20,0.10);border-left:3px solid #FAAD14;border-radius:6px;box-sizing:border-box;">
+        <div style="font-size:12px;font-weight:600;">② 订单超时自动关单</div>
+        <div style="font-size:11px;color:#6B7280;">下单发延迟消息 → TTL 到期 → 死信队列（DLX）→ 消费者幂等关单，名额自动释放</div>
+      </div>
+      <div style="flex:1 1 220px;min-width:0;padding:8px 10px;background:rgba(155,187,244,0.12);border-left:3px solid #9BBBF4;border-radius:6px;box-sizing:border-box;">
+        <div style="font-size:12px;font-weight:600;">③ 关场次批量取消</div>
+        <div style="font-size:11px;color:#6B7280;">店长关场次 → MQ 事件 → 批量取消该场未支付订单（SESSION_CLOSED）+ 名额回滚</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <div style="flex:1 1 220px;min-width:0;padding:8px 10px;background:rgba(201,167,232,0.12);border-left:3px solid #C9A7E8;border-radius:6px;box-sizing:border-box;">
+        <div style="font-size:12px;font-weight:600;">④ AI 智能客服（跨语言）</div>
+        <div style="font-size:11px;color:#6B7280;">玩家提问 → Java agent-gateway → Python LangGraph 意图识别 → 调内部接口 → 返回真实订单/剧本数据</div>
+      </div>
+      <div style="flex:1 1 220px;min-width:0;padding:8px 10px;background:rgba(94,212,195,0.10);border-left:3px solid #94D4D0;border-radius:6px;box-sizing:border-box;">
+        <div style="font-size:12px;font-weight:600;">⑤ 统一鉴权 / 配置 / 文档</div>
+        <div style="font-size:11px;color:#6B7280;">Gateway JWT 全局鉴权 + @RequireRole 角色控制 · Nacos 统一配置 · Knife4j 接口文档 · 雪花 ID 订单号</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</html>

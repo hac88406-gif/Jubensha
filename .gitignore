@@ -1,0 +1,88 @@
+# ============================================================
+# urban-script-reservation  .gitignore
+# 说明：仅忽略构建产物/日志/临时文件，源码与配置一律保留
+# ============================================================
+
+# ---------- Java / Maven ----------
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.zip
+*.tar.gz
+*.rar
+
+# Maven 日志
+_mvn_install.log
+_mvn_install.log.err
+
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+env/
+
+# ---------- IDE / Editor ----------
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ---------- 服务运行日志（目录） ----------
+_logs/
+
+# ---------- 服务运行日志（根目录散落的 .log / .err.log） ----------
+*.log
+*.err.log
+*.out.log
+
+# ---------- 冒烟测试临时产物（.txt .log） ----------
+smoke_*.log
+smoke_*.txt
+
+# ---------- 服务启动脚本输出的日志 ----------
+_svc_*.log
+_svc_*.err.log
+_svc_*.log.err
+
+# ---------- 压测/benchmark 临时输出 ----------
+interview_bench_*.txt
+
+# ---------- 本地交付临时草稿（内容已迁移至 docs/） ----------
+_deliverables_*.md
+
+# ---------- 本地个人笔记（非项目文档） ----------
+blog_post.md

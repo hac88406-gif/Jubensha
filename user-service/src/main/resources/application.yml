@@ -1,0 +1,89 @@
+# =============================================================================
+# user-service 用户微服务配置
+# -----------------------------------------------------------------------------
+# 端口: 8082 (避开旧项目 8080 / 新项目 Gateway 8081)
+# 数据库: MySQL 3306, 库 urban_script_reservation (新建独立库, 不复用 green_chain)
+# Redis: 6379, database 1
+# Nacos: 127.0.0.1:8848 (Discovery + Config)
+# =============================================================================
+
+server:
+  port: 8082
+
+spring:
+  application:
+    name: user-service
+
+  # Spring Boot 3.x Config Data API（官方推荐）：通过 import 列表直接从 Nacos 拉多个 DataId。
+  # 规则：列表越靠后，属性优先级越高（能覆盖前面同名属性）。
+  #   1) user-service.yaml    — 服务专用配置（优先级最低）
+  #   2) urban-shared.yaml    — 公共基础设施（MySQL/Redis 等各业务服务共用）
+  #   3) urban-shared-config  — 敏感配置（JWT 密钥 / 内部 API Key，最高优先级，最后加载）
+  # optional: Nacos 不可达时继续启动；生产环境可去掉 optional 改为强依赖
+  config:
+    import:
+      - "optional:nacos:user-service.yaml?group=DEFAULT_GROUP&refresh=true"
+      - "optional:nacos:urban-shared.yaml?group=DEFAULT_GROUP&refresh=true"
+      - "optional:nacos:urban-shared-config?group=DEFAULT_GROUP&refresh=true"
+
+  # -------------------- Cloud Nacos --------------------
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+        group: DEFAULT_GROUP
+        fail-fast: false          # 本地开发时 Nacos 未启动也不阻塞启动
+      config:
+        server-addr: 127.0.0.1:8848
+        file-extension: yaml
+        enabled: true             # 已在 spring.config.import 显式声明，保留 Nacos Config 功能
+        # 共享配置：存放 MySQL/Redis/公共常量，各业务服务共享一份
+        shared-configs:
+          - data-id: urban-shared.yaml
+            group: DEFAULT_GROUP
+            refresh: true
+
+  # -------------------- MySQL --------------------
+  datasource:
+    url: jdbc:mysql://localhost:3306/urban_script_reservation?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # -------------------- Redis (database 1, 避开旧项目的 database 0) --------------------
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 1
+      timeout: 3000
+
+# -------------------- MyBatis-Plus --------------------
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true    # 下划线列名自动转驼峰字段
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl   # 开发期打印 SQL, 生产去掉
+  global-config:
+    db-config:
+      id-type: none                       # 主键策略: 用我们的雪花 ID 生成器手动赋值
+
+# -------------------- Knife4j / OpenAPI --------------------
+springdoc:
+  swagger-ui:
+    path: /doc.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+# -------------------- 业务自定义配置 --------------------
+# ⚠️ 敏感配置（JWT 密钥、内部 API Key）已全部迁移到 Nacos urban-shared-config DataId，
+#    本文件不再硬编码，避免提交到仓库泄漏。若 Nacos 不可达，
+#    JwtAutoConfiguration / InternalApiKeyInterceptor 内置兜底默认值保持兼容。
+
+# -------------------- 日志 --------------------
+logging:
+  level:
+    com.urban.script.user: DEBUG
+    com.alibaba.nacos: WARN
+    com.baomidou.mybatisplus: DEBUG

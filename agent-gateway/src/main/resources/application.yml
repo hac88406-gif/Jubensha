@@ -1,0 +1,77 @@
+# =============================================================================
+# agent-gateway Agent 中间层网关配置
+# -----------------------------------------------------------------------------
+# 端口: 8085
+# 技术栈: Servlet 栈 + Sentinel 1.8.6 + OpenFeign
+# 说明: Python Agent (端口 8000) 不可用时 Sentinel fallback 兜底
+# =============================================================================
+
+server:
+  port: 8085
+
+spring:
+  application:
+    name: agent-gateway
+
+  # Spring Boot 3.x Config Data API（官方推荐）：通过 import 列表直接从 Nacos 拉多个 DataId。
+  # 规则：列表越靠后，属性优先级越高（能覆盖前面同名属性）。
+  #   1) agent-gateway.yaml   — 服务专用配置（优先级最低）
+  #   2) urban-shared.yaml    — 公共基础设施（MySQL/Redis 等各业务服务共用）
+  #   3) urban-shared-config  — 敏感配置（JWT 密钥 / 内部 API Key，最高优先级，最后加载）
+  config:
+    import:
+      - "optional:nacos:agent-gateway.yaml?group=DEFAULT_GROUP&refresh=true"
+      - "optional:nacos:urban-shared.yaml?group=DEFAULT_GROUP&refresh=true"
+      - "optional:nacos:urban-shared-config?group=DEFAULT_GROUP&refresh=true"
+
+  # -------------------- Cloud Nacos --------------------
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+        group: DEFAULT_GROUP
+        fail-fast: false
+      config:
+        server-addr: 127.0.0.1:8848
+        file-extension: yaml
+        enabled: true
+        shared-configs:
+          - data-id: urban-shared.yaml
+            group: DEFAULT_GROUP
+            refresh: true
+
+  # -------------------- Sentinel --------------------
+  # 已禁用：Windows 环境下 Sentinel 1.8.6 存在 DateFileLogHandler NPE 问题
+  # FallbackFactory 机制不依赖 Sentinel，Feign 异常时依然触发兜底
+  # 如需重新启用：把 sentinel.enabled 改回 true 并确保 Linux/Mac 环境运行
+  sentinel:
+    enabled: false
+
+# -------------------- 业务自定义配置 --------------------
+
+# Python Agent 基础 URL（Feign 直连，不走 Nacos 注册）
+agent:
+  base-url: http://localhost:8000
+
+# 服务间内部 API 鉴权 Key：
+# ⚠️ 已迁移到 Nacos DataId=urban-shared-config，配置项路径 urban.internal-api-key。
+# 本地文件不再硬编码，避免泄漏；若 Nacos 不可达，InternalApiKeyFilter 内置兜底默认值。
+
+# -------------------- Sentinel 规则（P0 先硬编码，后续可迁 Nacos DataSource） --------------------
+# 用 sentinel-datasource-nacos 扩展可以把规则存到 Nacos 配置中心热更新，
+# P0 阶段先不配置，让 fallback 逻辑兜底
+
+# -------------------- Knife4j --------------------
+springdoc:
+  swagger-ui:
+    path: /doc.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  api-docs:
+    path: /v3/api-docs
+
+# -------------------- 日志 --------------------
+logging:
+  level:
+    com.urban.script.agent: DEBUG
+    com.alibaba.nacos: WARN

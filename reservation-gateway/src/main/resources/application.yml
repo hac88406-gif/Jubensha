@@ -1,0 +1,139 @@
+# =============================================================================
+# reservation-gateway API 网关配置
+# -----------------------------------------------------------------------------
+# 端口：8081（避开旧项目 8080）
+# 依赖：Spring Cloud Gateway（WebFlux） + Nacos Discovery + Sentinel
+# =============================================================================
+
+server:
+  port: 8081
+  # Gateway 对 HTTP 响应做缓冲时，增大 body 上限（默认 1MB，给足空间）
+  max-http-header-size: 65536
+
+spring:
+  application:
+    name: reservation-gateway
+
+  # Spring Boot 3.x Config Data API（官方推荐）：通过 import 列表直接从 Nacos 拉多个 DataId。
+  # 规则：列表越靠后，属性优先级越高（能覆盖前面同名属性）。
+  #   1) reservation-gateway.yaml — 服务专用配置（优先级最低）
+  #   2) urban-shared.yaml        — 公共基础设施（MySQL/Redis 等各业务服务共用）
+  #   3) urban-shared-config      — 敏感配置（JWT 密钥 / 内部 API Key，最高优先级，最后加载）
+  config:
+    import:
+      - "optional:nacos:reservation-gateway.yaml?group=DEFAULT_GROUP&refresh=true"
+      - "optional:nacos:urban-shared.yaml?group=DEFAULT_GROUP&refresh=true"
+      - "optional:nacos:urban-shared-config?group=DEFAULT_GROUP&refresh=true"
+
+  # -------------------- Cloud Nacos --------------------
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+        group: DEFAULT_GROUP
+      config:
+        server-addr: 127.0.0.1:8848
+        file-extension: yaml
+        enabled: true
+        refresh-enabled: true
+        shared-configs:
+          # ① 平台级共享：MySQL/Redis 等环境相关公共常量（若已在 urban-shared.yaml 则沿用）
+          - data-id: urban-shared.yaml
+            group: DEFAULT_GROUP
+            refresh: true
+          # ② 敏感配置：JWT 密钥 + 内部 API Key（网关从 JwtUtil 静态字段解析 token，需要从 Nacos 拉最新值）
+          - data-id: urban-shared-config
+            group: DEFAULT_GROUP
+            refresh: true
+
+    # Gateway 路由
+    gateway:
+      # 让 Gateway 自动从 Nacos 发现服务并生成路由（可选；显式路由已配，这里仅作兜底）
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true    # 服务名小写匹配
+
+      # ========== 显式路由规则（核心） ==========
+      routes:
+        # 用户服务：注册 / 登录 / 个人信息
+        - id: user-route
+          uri: lb://user-service          # lb = LoadBalancer，从 Nacos 按服务名找实例
+          predicates:
+            - Path=/api/user/**
+          filters:
+            # StripPrefix=1 只去掉 /api 前缀，保留 /user 段（下游有类级别 @RequestMapping("/user")）
+            - StripPrefix=1
+
+        # 店铺服务（ShopController 类级别 @RequestMapping("/shop")）
+        # 统一约定：/api/{服务段}/** + StripPrefix=1（只剥 /api，保留服务段对齐下游类路径）
+        # ⚠️ 曾用 StripPrefix=2 导致 /api/shop/list 被剥成 /list → 404「No static resource」
+        - id: shop-route
+          uri: lb://shop-service
+          predicates:
+            - Path=/api/shop/**
+          filters:
+            - StripPrefix=1
+
+        # 场次服务（SessionController 类级别 @RequestMapping("/session")，归属 shop-service）
+        # ⚠️ 旧配置无此路由，/api/session/** 只能借道 /api/shop/session/**（StripPrefix=2 碰巧剥对）
+        - id: session-route
+          uri: lb://shop-service
+          predicates:
+            - Path=/api/session/**
+          filters:
+            - StripPrefix=1
+
+        # 剧本服务（ScriptController 类级别 @RequestMapping("/script")，归属 shop-service）
+        # ⚠️ 旧配置完全缺失 script 路由，/api/script/** 404
+        - id: script-route
+          uri: lb://shop-service
+          predicates:
+            - Path=/api/script/**
+          filters:
+            - StripPrefix=1
+
+        # 订单服务（OrderController 类级别 @RequestMapping("/order")）
+        - id: order-route
+          uri: lb://order-service
+          predicates:
+            - Path=/api/order/**
+          filters:
+            - StripPrefix=1
+
+        # 代理/渠道网关（白名单，不走 JWT 校验）
+        # AgentController 类级别 @RequestMapping("/agent")
+        # ⚠️ 曾用 StripPrefix=2 导致 /api/agent/chat 被剥成 /chat → 404，同样统一为 1
+        - id: agent-route
+          uri: lb://agent-gateway
+          predicates:
+            - Path=/api/agent/**
+          filters:
+            - StripPrefix=1
+
+    # Sentinel 开发环境暂时关闭（pom 依赖已注释）
+
+# ==================== Actuator（健康检查，Nacos/Sentinel 会探测） ====================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway    # 暴露 gateway endpoint 方便调试路由
+  endpoint:
+    health:
+      show-details: always
+  # Gateway 自带的 gateway actuator 端点，可列出所有路由规则
+  gateway:
+    actuator:
+      verbose:
+        enabled: true
+
+# ==================== 日志 ====================
+logging:
+  level:
+    # Gateway 路由相关日志
+    org.springframework.cloud.gateway: INFO
+    # 我们自己的过滤器
+    com.urban.script.gateway: DEBUG
+    # Nacos 客户端
+    com.alibaba.nacos: WARN

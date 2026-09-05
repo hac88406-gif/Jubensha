@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <!-- ========================================================== -->
+    <!-- reservation-gateway : API 网关 (端口 8081, WebFlux)         -->
+    <!-- 关键: 绝对不能引 starter-web, 否则与 WebFlux 冲突          -->
+    <!-- ========================================================== -->
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.urban.script</groupId>
+        <artifactId>urban-script-reservation</artifactId>
+        <version>1.0.0</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>reservation-gateway</artifactId>
+    <name>reservation-gateway</name>
+    <description>API 网关: Nacos + Sentinel + JWT 鉴权 (WebFlux, 端口 8081)</description>
+
+    <dependencies>
+        <!-- 公共模块 (纯 POJO, 无 Web 冲突) -->
+        <dependency>
+            <groupId>com.urban.script</groupId>
+            <artifactId>reservation-common</artifactId>
+        </dependency>
+
+        <!-- Spring Cloud Gateway (内含 WebFlux, 不要再引 starter-web!) -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-gateway</artifactId>
+        </dependency>
+
+        <!-- Nacos 服务发现 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+
+        <!-- Nacos 配置中心：从 Nacos 拉 urban-shared-config（JWT 密钥 / 内部 API Key 等敏感配置） -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
+        </dependency>
+
+        <!-- Gateway 用 lb:// 动态路由必须显式引 Spring Cloud LoadBalancer（2023.x 不再由 Nacos Discovery 传递） -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+        </dependency>
+
+        <!-- Sentinel 限流熔断 —— 开发环境暂时关闭（Windows 下日志文件目录权限导致 NPE） -->
+        <!-- <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-sentinel</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-alibaba-sentinel-gateway</artifactId>
+        </dependency> -->
+
+        <!-- jjwt runtime (jjwt-api 已由 common 传递) -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+        </dependency>
+
+        <!-- 健康检查 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <skip>false</skip>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
