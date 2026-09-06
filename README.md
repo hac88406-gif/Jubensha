@@ -258,5 +258,4 @@ node smoke_mainchain.js
 | 简历亮点摘要     | [docs/RESUME\_HIGHLIGHTS.md](docs/RESUME_HIGHLIGHTS.md) | 每条亮点都有量化结果                       |
 | 面试素材清单     | [docs/INTERVIEW\_ASSETS.md](docs/INTERVIEW_ASSETS.md)   | interview\_shots/ 下每张截图的用途说明     |
 | 脚本说明       | [scripts/README.md](scripts/README.md)                  | 根目录 benchmark / smoke 脚本的用途和运行方式 |
-| 工程化改造记录    | [CHANGELOG\_工程化改造.md](CHANGELOG_工程化改造.md)               | 上传 GitHub 前的整理追溯清单（零源码变更）        |
 
