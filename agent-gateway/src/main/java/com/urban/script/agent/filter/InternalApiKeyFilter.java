@@ -68,8 +68,18 @@ public class InternalApiKeyFilter implements Filter {
         }
 
         // 每次都从 Environment 拿最新值（Nacos 热刷新无需重启）。
-        // fallback 与 InternalApiKeyInterceptor 完全一致，确保"Nacos 不可达"时服务间调用仍兼容。
-        String expected = env.getProperty("urban.internal-api-key", "urban-internal-api-key-dev-fallback");
+        // 密钥统一由配置提供（Nacos urban-shared-config > 环境变量 > 各服务 yml 默认值），
+        // 源码不再内置硬编码兜底：拿不到就直接拒绝，避免"公开的默认值"变成绕过内部鉴权的通道。
+        String expected = env.getProperty("urban.internal-api-key");
+        if (expected == null || expected.isBlank()) {
+            log.error("[InternalApiKeyFilter] ❌ agent-gateway 未配置 urban.internal-api-key，拒绝内部请求 URI={}",
+                    requestURI);
+            httpResponse.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            httpResponse.setContentType("application/json;charset=UTF-8");
+            httpResponse.getWriter().write(objectMapper.writeValueAsString(
+                    R.fail(403, "服务间鉴权未配置")));
+            return;
+        }
         String apiKey = httpRequest.getHeader("X-Internal-Api-Key");
 
         if (apiKey == null || !apiKey.equals(expected)) {

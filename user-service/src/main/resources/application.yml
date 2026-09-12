@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # user-service 用户微服务配置
 # -----------------------------------------------------------------------------
 # 端口: 8082 (避开旧项目 8080 / 新项目 Gateway 8081)
@@ -22,10 +22,10 @@ spring:
   # optional: Nacos 不可达时继续启动；生产环境可去掉 optional 改为强依赖
   config:
     import:
+      # optional: 前缀 —— Nacos 不可达时降级为本地配置，不阻塞启动（本地开发可不先起 Nacos）
       - "optional:nacos:user-service.yaml?group=DEFAULT_GROUP&refresh=true"
       - "optional:nacos:urban-shared.yaml?group=DEFAULT_GROUP&refresh=true"
       - "optional:nacos:urban-shared-config?group=DEFAULT_GROUP&refresh=true"
-
   # -------------------- Cloud Nacos --------------------
   cloud:
     nacos:
@@ -37,11 +37,9 @@ spring:
         server-addr: 127.0.0.1:8848
         file-extension: yaml
         enabled: true             # 已在 spring.config.import 显式声明，保留 Nacos Config 功能
-        # 共享配置：存放 MySQL/Redis/公共常量，各业务服务共享一份
-        shared-configs:
-          - data-id: urban-shared.yaml
-            group: DEFAULT_GROUP
-            refresh: true
+        # 配置导入校验：import 列表为空时直接报错，避免静默降级
+        import-check:
+          enabled: true
 
   # -------------------- MySQL --------------------
   datasource:
@@ -77,12 +75,21 @@ springdoc:
     path: /v3/api-docs
 
 # -------------------- 业务自定义配置 --------------------
-# ⚠️ 敏感配置（JWT 密钥、内部 API Key）已全部迁移到 Nacos urban-shared-config DataId，
-#    本文件不再硬编码，避免提交到仓库泄漏。若 Nacos 不可达，
-#    JwtAutoConfiguration / InternalApiKeyInterceptor 内置兜底默认值保持兼容。
+# 🔐 JWT 密钥：由 JwtAutoConfiguration 启动时写入 JwtUtil（reservation-common 共享 jar）。
+#    取值优先级：Nacos urban-shared-config 的 jwt.secret > 环境变量 JWT_SECRET > 下方本地默认值。
+#    ⚠️ 下方默认值仅供本地开发（无 Nacos、未设环境变量时）；生产必须用 Nacos 或环境变量覆盖。
+jwt:
+  secret: "${JWT_SECRET:dev-only-jwt-secret-override-in-production-32bytes}"
+  expire-millis: ${JWT_EXPIRE_MILLIS:7200000}
+
+# 🔐 内部接口 API Key（InternalApiKeyFilter / InternalApiKeyInterceptor）：同样优先取 Nacos
+urban:
+  internal-api-key: "${URBAN_INTERNAL_API_KEY:urban-internal-api-key-dev-fallback}"
 
 # -------------------- 日志 --------------------
 logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{traceId:-}] [%thread] %logger{36} - %msg%n"
   level:
     com.urban.script.user: DEBUG
     com.alibaba.nacos: WARN

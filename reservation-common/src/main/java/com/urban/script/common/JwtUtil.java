@@ -23,15 +23,25 @@ import java.util.Map;
  * </ul>
  * </p>
  * <p>
- * 默认配置（可通过 {@link #setSecret(String)} / {@link #setExpireMillis(long)} 覆盖）：
- *   - 密钥：固定 32 字节字符串（生产环境请改成配置文件读取）
+ * 配置来源（由 {@link com.urban.script.common.config.JwtAutoConfiguration} 从
+ * Nacos / 环境变量加载后，通过 {@link #setSecret(String)} / {@link #setExpireMillis(long)} 注入）：
+ *   - 密钥：必须外部注入，源码不设默认值（避免仓库公开即泄漏签发能力）
  *   - 过期时间：2 小时
  * </p>
  */
 public final class JwtUtil {
 
     /**
-     * 默认密钥（生产环境建议从 Nacos 配置中心读，不要硬编码）
+     * JWT 密钥 —— 刻意不设默认值，必须由配置注入。
+     * <p>
+     * 取值优先级：Nacos urban-shared-config 的 {@code jwt.secret} &gt;
+     * 环境变量 {@code JWT_SECRET} &gt; 各服务 application.yml 的 {@code jwt.secret} 默认值，
+     * 由 {@link com.urban.script.common.config.JwtAutoConfiguration} 启动时调用
+     * {@link #setSecret(String)} 写入。
+     * <p>
+     * ⚠️ 这里刻意不留硬编码密钥：旧版本把固定密钥写在源码里，仓库一旦公开，
+     * 等于把「签发合法 token 的能力」一并公开 —— 任何人用同一密钥即可伪造 token
+     * 冒充任意用户甚至管理员。改为配置注入后，密钥不再随代码泄漏。
      * <p>
      * ⚠️ 必须是 volatile：Nacos 配置刷新线程（JwtAutoConfiguration.onApplicationEvent）
      * 调用 {@link #setSecret(String)} 写入，而 Tomcat 请求线程通过 {@link #getKey()} 读取。
@@ -39,7 +49,7 @@ public final class JwtUtil {
      * Gateway 解析线程可能长时间读到旧 SECRET，出现"登录成功但所有接口 401
      * （token 签名无效）"的诡异现象，极难复现定位。
      */
-    private static volatile String SECRET = "urban-script-reservation-jwt-secret-key-min-32bytes!!";
+    private static volatile String SECRET = "";
 
     /**
      * 默认过期时间：2 小时
@@ -57,7 +67,14 @@ public final class JwtUtil {
 
     // ====== 私有：生成 SecretKey ======
     private static SecretKey getKey() {
-        return Keys.hmacShaKeyFor(SECRET.getBytes(StandardCharsets.UTF_8));
+        String secret = SECRET;
+        if (secret == null || secret.isBlank()) {
+            // fail-fast：宁可启动即报错，也不要拿空密钥签发"人人都能伪造"的 token
+            throw new IllegalStateException(
+                    "JWT 密钥未配置：请设置环境变量 JWT_SECRET（长度 >= 32 字节），"
+                            + "或在 Nacos urban-shared-config 中配置 jwt.secret");
+        }
+        return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
 
     /**

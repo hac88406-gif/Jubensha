@@ -43,9 +43,8 @@ public class DelayCancelProducer {
 
     /**
      * 默认延迟：15 分钟（玩家支付窗口期）
-     * ⚠️ 冒烟测试临时改为 30 秒（Step19），生产值需还原为 15*60*1000L
      */
-    private static final long DEFAULT_DELAY_MS = 30 * 1000L;
+    private static final long DEFAULT_DELAY_MS = 15 * 60 * 1000L;
 
     /**
      * 发送延迟关单消息（默认 15 分钟后到期）

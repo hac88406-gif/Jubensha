@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # agent-gateway Agent 中间层网关配置
 # -----------------------------------------------------------------------------
 # 端口: 8085
@@ -20,10 +20,10 @@ spring:
   #   3) urban-shared-config  — 敏感配置（JWT 密钥 / 内部 API Key，最高优先级，最后加载）
   config:
     import:
+      # optional: 前缀 —— Nacos 不可达时降级为本地配置，不阻塞启动（本地开发可不先起 Nacos）
       - "optional:nacos:agent-gateway.yaml?group=DEFAULT_GROUP&refresh=true"
       - "optional:nacos:urban-shared.yaml?group=DEFAULT_GROUP&refresh=true"
       - "optional:nacos:urban-shared-config?group=DEFAULT_GROUP&refresh=true"
-
   # -------------------- Cloud Nacos --------------------
   cloud:
     nacos:
@@ -35,10 +35,9 @@ spring:
         server-addr: 127.0.0.1:8848
         file-extension: yaml
         enabled: true
-        shared-configs:
-          - data-id: urban-shared.yaml
-            group: DEFAULT_GROUP
-            refresh: true
+        # 配置导入校验：import 列表为空时直接报错，避免静默降级（此前靠 false 绕过了校验）
+        import-check:
+          enabled: true
 
   # -------------------- Sentinel --------------------
   # 已禁用：Windows 环境下 Sentinel 1.8.6 存在 DateFileLogHandler NPE 问题
@@ -53,9 +52,17 @@ spring:
 agent:
   base-url: http://localhost:8000
 
-# 服务间内部 API 鉴权 Key：
-# ⚠️ 已迁移到 Nacos DataId=urban-shared-config，配置项路径 urban.internal-api-key。
-# 本地文件不再硬编码，避免泄漏；若 Nacos 不可达，InternalApiKeyFilter 内置兜底默认值。
+# 🔐 JWT 密钥：由 JwtAutoConfiguration 启动时写入 JwtUtil（reservation-common 共享 jar）。
+#    取值优先级：Nacos urban-shared-config 的 jwt.secret > 环境变量 JWT_SECRET > 下方本地默认值。
+#    ⚠️ 下方默认值仅供本地开发（无 Nacos、未设环境变量时）；生产必须用 Nacos 或环境变量覆盖。
+jwt:
+  secret: "${JWT_SECRET:dev-only-jwt-secret-override-in-production-32bytes}"
+  expire-millis: ${JWT_EXPIRE_MILLIS:7200000}
+
+# 🔐 服务间内部 API 鉴权 Key（InternalApiKeyFilter / Interceptor）：
+#    优先取 Nacos urban.internal-api-key，未配置时用下方本地默认值
+urban:
+  internal-api-key: "${URBAN_INTERNAL_API_KEY:urban-internal-api-key-dev-fallback}"
 
 # -------------------- Sentinel 规则（P0 先硬编码，后续可迁 Nacos DataSource） --------------------
 # 用 sentinel-datasource-nacos 扩展可以把规则存到 Nacos 配置中心热更新，
@@ -72,6 +79,8 @@ springdoc:
 
 # -------------------- 日志 --------------------
 logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{traceId:-}] [%thread] %logger{36} - %msg%n"
   level:
     com.urban.script.agent: DEBUG
     com.alibaba.nacos: WARN

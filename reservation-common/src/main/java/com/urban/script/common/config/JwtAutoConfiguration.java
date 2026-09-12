@@ -72,11 +72,14 @@ public class JwtAutoConfiguration implements ApplicationListener<ApplicationEven
 
     private void applyToJwtUtil(String phase) {
         String secret = env.getProperty("jwt.secret");
-        if (secret == null || secret.length() < 32) {
-            log.warn("[JwtAutoConfiguration] ⚠️ {}: jwt.secret 未从 Nacos 获取或长度<32字节" +
-                            "(当前 secret={})，继续使用 JwtUtil 默认密钥保持兼容",
-                    phase, secret == null ? "null" : "len=" + secret.length());
-            return;
+        if (secret == null || secret.isBlank() || secret.length() < 32) {
+            // ⚠️ 不再回退到硬编码默认密钥 —— 那等于把「签发 token 的能力」随仓库一起公开。
+            // 各服务 application.yml 均提供 jwt.secret 默认值（可用环境变量 JWT_SECRET 覆盖），
+            // 因此走到这里说明配置确实缺失，直接 fail-fast 比运行时大面积 401 更好定位。
+            throw new IllegalStateException(String.format(
+                    "[JwtAutoConfiguration] %s: jwt.secret 缺失或长度不足 32 字节（当前 %s）。"
+                            + "请设置环境变量 JWT_SECRET，或在 Nacos urban-shared-config 中配置 jwt.secret。",
+                    phase, secret == null ? "null" : "len=" + secret.length()));
         }
 
         long expireMillis = 7_200_000L;  // 默认 2 小时

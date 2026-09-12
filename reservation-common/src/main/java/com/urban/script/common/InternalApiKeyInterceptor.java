@@ -46,9 +46,15 @@ public class InternalApiKeyInterceptor implements RequestInterceptor {
      */
     @Override
     public void apply(RequestTemplate template) {
-        // 与 InternalApiKeyFilter 的 fallback 完全一致，确保"Nacos 不可达"时服务间调用仍兼容。
-        // 正常情况下从 Nacos urban-shared-config 的 urban.internal-api-key 取。
-        String apiKey = env.getProperty("urban.internal-api-key", "urban-internal-api-key-dev-fallback");
+        // 密钥统一由配置提供（Nacos urban-shared-config > 环境变量 > 各服务 yml 默认值）。
+        // 源码不再内置硬编码兜底：缺失时直接报错，避免拿错误密钥静默调用下游、
+        // 只看到下游 403 而难以定位根因。
+        String apiKey = env.getProperty("urban.internal-api-key");
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException(
+                    "未配置 urban.internal-api-key，无法携带内部鉴权头调用下游："
+                            + "请设置环境变量 URBAN_INTERNAL_API_KEY，或在 Nacos urban-shared-config 中配置");
+        }
         template.header("X-Internal-Api-Key", apiKey);
     }
 }

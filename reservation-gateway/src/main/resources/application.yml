@@ -21,44 +21,39 @@ spring:
   #   3) urban-shared-config      — 敏感配置（JWT 密钥 / 内部 API Key，最高优先级，最后加载）
   config:
     import:
+      # optional: 前缀 —— Nacos 不可达时降级为本地配置，不阻塞启动（本地开发可不先起 Nacos）
       - "optional:nacos:reservation-gateway.yaml?group=DEFAULT_GROUP&refresh=true"
       - "optional:nacos:urban-shared.yaml?group=DEFAULT_GROUP&refresh=true"
       - "optional:nacos:urban-shared-config?group=DEFAULT_GROUP&refresh=true"
-
   # -------------------- Cloud Nacos --------------------
   cloud:
     nacos:
       discovery:
         server-addr: 127.0.0.1:8848
         group: DEFAULT_GROUP
+        fail-fast: false
       config:
         server-addr: 127.0.0.1:8848
         file-extension: yaml
         enabled: true
+        # 开启热刷新：Nacos 修改 jwt.secret 后 JwtAutoConfiguration 自动重新注入 JwtUtil，无需重启
         refresh-enabled: true
-        shared-configs:
-          # ① 平台级共享：MySQL/Redis 等环境相关公共常量（若已在 urban-shared.yaml 则沿用）
-          - data-id: urban-shared.yaml
-            group: DEFAULT_GROUP
-            refresh: true
-          # ② 敏感配置：JWT 密钥 + 内部 API Key（网关从 JwtUtil 静态字段解析 token，需要从 Nacos 拉最新值）
-          - data-id: urban-shared-config
-            group: DEFAULT_GROUP
-            refresh: true
+        # 配置导入校验：import 列表为空时直接报错，避免静默降级
+        import-check:
+          enabled: true
 
     # Gateway 路由
     gateway:
       # 让 Gateway 自动从 Nacos 发现服务并生成路由（可选；显式路由已配，这里仅作兜底）
       discovery:
         locator:
-          enabled: true
-          lower-case-service-id: true    # 服务名小写匹配
+          enabled: false   # 暂不用 Nacos 自动发现，全部显式路由
 
       # ========== 显式路由规则（核心） ==========
       routes:
         # 用户服务：注册 / 登录 / 个人信息
         - id: user-route
-          uri: lb://user-service          # lb = LoadBalancer，从 Nacos 按服务名找实例
+          uri: http://127.0.0.1:8082   # 本地直连，绕过 Nacos
           predicates:
             - Path=/api/user/**
           filters:
@@ -69,7 +64,7 @@ spring:
         # 统一约定：/api/{服务段}/** + StripPrefix=1（只剥 /api，保留服务段对齐下游类路径）
         # ⚠️ 曾用 StripPrefix=2 导致 /api/shop/list 被剥成 /list → 404「No static resource」
         - id: shop-route
-          uri: lb://shop-service
+          uri: http://127.0.0.1:8083
           predicates:
             - Path=/api/shop/**
           filters:
@@ -78,7 +73,7 @@ spring:
         # 场次服务（SessionController 类级别 @RequestMapping("/session")，归属 shop-service）
         # ⚠️ 旧配置无此路由，/api/session/** 只能借道 /api/shop/session/**（StripPrefix=2 碰巧剥对）
         - id: session-route
-          uri: lb://shop-service
+          uri: http://127.0.0.1:8083
           predicates:
             - Path=/api/session/**
           filters:
@@ -87,7 +82,7 @@ spring:
         # 剧本服务（ScriptController 类级别 @RequestMapping("/script")，归属 shop-service）
         # ⚠️ 旧配置完全缺失 script 路由，/api/script/** 404
         - id: script-route
-          uri: lb://shop-service
+          uri: http://127.0.0.1:8083
           predicates:
             - Path=/api/script/**
           filters:
@@ -95,7 +90,7 @@ spring:
 
         # 订单服务（OrderController 类级别 @RequestMapping("/order")）
         - id: order-route
-          uri: lb://order-service
+          uri: http://127.0.0.1:8084
           predicates:
             - Path=/api/order/**
           filters:
@@ -105,9 +100,19 @@ spring:
         # AgentController 类级别 @RequestMapping("/agent")
         # ⚠️ 曾用 StripPrefix=2 导致 /api/agent/chat 被剥成 /chat → 404，同样统一为 1
         - id: agent-route
-          uri: lb://agent-gateway
+          uri: http://127.0.0.1:8085
           predicates:
             - Path=/api/agent/**
+          filters:
+            - StripPrefix=1
+
+        # 推荐服务（RecommendController 类级别 @RequestMapping("/recommend")）
+        # 公开接口：/recommend、/recommend/hot、/recommend/similar/{id}
+        # 内部接口：/recommend/internal/**（带 X-Internal-Api-Key，下游 Filter 校验）
+        - id: recommend-route
+          uri: http://127.0.0.1:8086
+          predicates:
+            - Path=/api/recommend/**
           filters:
             - StripPrefix=1
 
@@ -127,6 +132,18 @@ management:
     actuator:
       verbose:
         enabled: true
+
+# ==================== 业务自定义配置 ====================
+# 🔐 JWT 密钥：网关自身也用 JwtUtil 解析/验签 token，必须与其他服务共用同一份密钥。
+#    取值优先级：Nacos urban-shared-config 的 jwt.secret > 环境变量 JWT_SECRET > 下方本地默认值。
+#    ⚠️ 下方默认值仅供本地开发（无 Nacos、未设环境变量时）；生产必须用 Nacos 或环境变量覆盖。
+jwt:
+  secret: "${JWT_SECRET:dev-only-jwt-secret-override-in-production-32bytes}"
+  expire-millis: ${JWT_EXPIRE_MILLIS:7200000}
+
+# 🔐 内部接口 API Key（网关放行 /**/internal/** 后，由下游 InternalApiKeyFilter 校验）
+urban:
+  internal-api-key: "${URBAN_INTERNAL_API_KEY:urban-internal-api-key-dev-fallback}"
 
 # ==================== 日志 ====================
 logging:

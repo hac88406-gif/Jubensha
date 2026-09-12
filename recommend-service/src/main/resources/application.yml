@@ -1,0 +1,71 @@
+# =============================================================================
+# recommend-service 推荐微服务配置
+# 端口: 8086
+# Neo4j: bolt://localhost:7687 (neo4j/urban-neo4j)
+# Redis: 6379, database 1 (推荐结果缓存)
+# =============================================================================
+
+server:
+  port: 8086
+
+spring:
+  application:
+    name: recommend-service
+
+  # Spring Boot 3.x Config Data API：从 Nacos 拉取服务配置 + 公共配置 + 敏感配置
+  # optional: 前缀 —— Nacos 不可达时降级为本地配置，不阻塞启动
+  config:
+    import:
+      - "optional:nacos:recommend-service.yaml?group=DEFAULT_GROUP&refresh=true"
+      - "optional:nacos:urban-shared.yaml?group=DEFAULT_GROUP&refresh=true"
+      - "optional:nacos:urban-shared-config?group=DEFAULT_GROUP&refresh=true"
+
+  # -------------------- Cloud Nacos（Discovery 注册，供 Feign 按服务名解析） --------------------
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+        group: DEFAULT_GROUP
+        fail-fast: false
+      config:
+        server-addr: 127.0.0.1:8848
+        file-extension: yaml
+        enabled: true
+        # 配置导入校验：import 列表为空时直接报错，避免静默降级
+        import-check:
+          enabled: true
+
+  # -------------------- Neo4j --------------------
+  neo4j:
+    uri: bolt://localhost:7687
+    authentication:
+      username: neo4j
+      password: urban-neo4j
+
+  # -------------------- Redis --------------------
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 1
+      timeout: 3000
+
+# -------------------- 业务自定义配置 --------------------
+# 🔐 JWT 密钥：由 JwtAutoConfiguration 启动时写入 JwtUtil（reservation-common 共享 jar）。
+#    取值优先级：Nacos urban-shared-config 的 jwt.secret > 环境变量 JWT_SECRET > 下方本地默认值。
+#    ⚠️ 下方默认值仅供本地开发（无 Nacos、未设环境变量时）；生产必须用 Nacos 或环境变量覆盖。
+jwt:
+  secret: "${JWT_SECRET:dev-only-jwt-secret-override-in-production-32bytes}"
+  expire-millis: ${JWT_EXPIRE_MILLIS:7200000}
+
+# 🔐 内部接口 API Key（InternalApiKeyFilter / InternalApiKeyInterceptor）
+urban:
+  internal-api-key: "${URBAN_INTERNAL_API_KEY:urban-internal-api-key-dev-fallback}"
+
+# -------------------- 日志 --------------------
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{traceId:-}] [%thread] %logger{36} - %msg%n"
+  level:
+    com.urban.script.recommend: DEBUG
+    org.springframework.data.neo4j: WARN

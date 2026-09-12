@@ -1,4 +1,4 @@
-package com.urban.script.order.filter;
+package com.urban.script.recommend.filter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.urban.script.common.R;
@@ -18,12 +18,11 @@ import org.springframework.stereotype.Component;
 import java.io.IOException;
 
 /**
- * order-service 内部接口鉴权 Filter —— 拦所有 /internal/** 路径
- *
- * <p>密钥通过 {@link Environment} 每次实时读取，Nacos 改 urban.internal-api-key 后，
- * <b>无需重启服务</b>即可生效。
- *
- * @author urban-script-reservation
+ * recommend-service 内部接口鉴权 Filter —— 拦所有 /internal/** 路径
+ * <p>
+ * 与 shop-service / order-service 保持一致：
+ * 校验 X-Internal-Api-Key Header，不匹配返回 403 "服务间鉴权失败"。
+ * 密钥从 Environment 实时读取，支持 Nacos 热刷新。
  */
 @Slf4j
 @Component
@@ -39,8 +38,7 @@ public class InternalApiKeyFilter implements Filter {
     }
 
     @Override
-    public void init(FilterConfig filterConfig) throws ServletException {
-        // no-op
+    public void init(FilterConfig filterConfig) {
     }
 
     @Override
@@ -52,18 +50,17 @@ public class InternalApiKeyFilter implements Filter {
 
         String requestURI = httpRequest.getRequestURI();
 
-        // 只拦截 /internal/** 路径
+        // 只拦截 /internal/** 路径（如 /recommend/internal/sync/script）
         if (!requestURI.contains("/internal/")) {
             chain.doFilter(request, response);
             return;
         }
 
-        // 每次都从 Environment 拿最新值（Nacos 热刷新无需重启）。
         // 密钥统一由配置提供（Nacos urban-shared-config > 环境变量 > 各服务 yml 默认值），
         // 源码不再内置硬编码兜底：拿不到就直接拒绝，避免"公开的默认值"变成绕过内部鉴权的通道。
         String expected = env.getProperty("urban.internal-api-key");
         if (expected == null || expected.isBlank()) {
-            log.error("[InternalApiKeyFilter] ❌ order-service 未配置 urban.internal-api-key，拒绝内部请求 URI={}",
+            log.error("[InternalApiKeyFilter] recommend-service 未配置 urban.internal-api-key，拒绝内部请求 URI={}",
                     requestURI);
             httpResponse.setStatus(HttpServletResponse.SC_FORBIDDEN);
             httpResponse.setContentType("application/json;charset=UTF-8");
@@ -74,12 +71,9 @@ public class InternalApiKeyFilter implements Filter {
         String apiKey = httpRequest.getHeader("X-Internal-Api-Key");
 
         if (apiKey == null || !apiKey.equals(expected)) {
-            log.warn("[InternalApiKeyFilter] ❌ order-service 服务间鉴权失败 URI={}, client={}, header={}",
-                    requestURI, httpRequest.getRemoteAddr(), apiKey);
-
+            log.warn("[InternalApiKeyFilter] recommend-service 鉴权失败 URI={}, header={}", requestURI, apiKey);
             httpResponse.setStatus(HttpServletResponse.SC_FORBIDDEN);
             httpResponse.setContentType("application/json;charset=UTF-8");
-
             R<String> error = R.fail(403, "服务间鉴权失败");
             httpResponse.getWriter().write(objectMapper.writeValueAsString(error));
             return;
@@ -90,6 +84,5 @@ public class InternalApiKeyFilter implements Filter {
 
     @Override
     public void destroy() {
-        // no-op
     }
 }

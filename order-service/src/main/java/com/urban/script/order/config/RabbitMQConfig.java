@@ -8,6 +8,7 @@ import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -76,13 +77,18 @@ public class RabbitMQConfig {
 
     /**
      * 延迟关单 Queue —— 到期后转发到 DLX
+     *
+     * 设计：同时设置队列级别的 x-message-ttl 和每条消息的 expiration header，
+     * 两者取较小值。队列 TTL 与 Producer 的 DEFAULT_DELAY_MS 保持一致（15 分钟），
+     * 保证任何消息进队后最多 15 分钟必过期，转 DLX 触发超时关单。
      */
     @Bean
     public Queue orderDelayQueue() {
-        Map<String, Object> args = Map.of(
-                "x-dead-letter-exchange", EXCHANGE_ORDER_DLX,
-                "x-dead-letter-routing-key", ROUTING_KEY_ORDER_DLX
-        );
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", EXCHANGE_ORDER_DLX);
+        args.put("x-dead-letter-routing-key", ROUTING_KEY_ORDER_DLX);
+        // 队列级 TTL：15 分钟，与 DelayCancelProducer.DEFAULT_DELAY_MS 对齐
+        args.put("x-message-ttl", 15 * 60 * 1000L);
         return QueueBuilder.durable(QUEUE_ORDER_DELAY)
                 .withArguments(args)
                 .build();

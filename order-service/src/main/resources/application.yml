@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # order-service 订单微服务配置
 # -----------------------------------------------------------------------------
 # 端口: 8084
@@ -22,10 +22,10 @@ spring:
   #   3) urban-shared-config — 敏感配置（JWT 密钥 / 内部 API Key，最高优先级，最后加载）
   config:
     import:
+      # optional: 前缀 —— Nacos 不可达时降级为本地配置，不阻塞启动（本地开发可不先起 Nacos）
       - "optional:nacos:order-service.yaml?group=DEFAULT_GROUP&refresh=true"
       - "optional:nacos:urban-shared.yaml?group=DEFAULT_GROUP&refresh=true"
       - "optional:nacos:urban-shared-config?group=DEFAULT_GROUP&refresh=true"
-
   # -------------------- Cloud Nacos --------------------
   cloud:
     nacos:
@@ -37,11 +37,9 @@ spring:
         server-addr: 127.0.0.1:8848
         file-extension: yaml
         enabled: true
-        # 共享配置（MySQL/Redis 等各业务服务共用）
-        shared-configs:
-          - data-id: urban-shared.yaml
-            group: DEFAULT_GROUP
-            refresh: true
+        # 配置导入校验：import 列表为空时直接报错，避免静默降级（此前靠 false 绕过了校验）
+        import-check:
+          enabled: true
 
   # Sentinel —— P0 阶段关闭，agent-gateway 再开
   sentinel:
@@ -106,12 +104,28 @@ springdoc:
     path: /v3/api-docs
 
 # -------------------- 业务自定义配置 --------------------
-# ⚠️ 敏感配置（JWT 密钥、内部 API Key）已迁移到 Nacos urban-shared-config DataId，
-#    本文件不再硬编码，避免提交到仓库泄漏。若 Nacos 不可达，
-#    InternalApiKeyFilter / InternalApiKeyInterceptor 内置兜底默认值保持兼容。
+# 🔐 JWT 密钥：由 JwtAutoConfiguration 在启动时写入 JwtUtil（reservation-common 共享 jar）。
+#    取值优先级：Nacos urban-shared-config 的 jwt.secret  >  环境变量 JWT_SECRET  >  下方本地默认值。
+#    ⚠️ 下方默认值仅供本地开发（无 Nacos、未设环境变量时）使用。
+#       生产环境必须通过 Nacos 或环境变量覆盖；仓库中出现过的任何默认密钥都应视为已公开，不可用于线上。
+jwt:
+  secret: "${JWT_SECRET:dev-only-jwt-secret-override-in-production-32bytes}"
+  expire-millis: ${JWT_EXPIRE_MILLIS:7200000}
+
+# 🔐 内部接口 API Key（InternalApiKeyFilter / InternalApiKeyInterceptor）：
+#    同样优先从 Nacos 取；未配置时组件内置兜底值仅供本地联调。
+urban:
+  internal-api-key: "${URBAN_INTERNAL_API_KEY:urban-internal-api-key-dev-fallback}"
+
+# 🔐 支付回调验签密钥（回调接口免鉴权，靠 HMAC 验签自证身份）
+#    优先级：Nacos pay.sign-secret > 环境变量 PAY_SIGN_SECRET > 下方本地默认值
+pay:
+  sign-secret: "${PAY_SIGN_SECRET:dev-only-pay-sign-secret-override-in-production}"
 
 # -------------------- 日志 --------------------
 logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{traceId:-}] [%thread] %logger{36} - %msg%n"
   level:
     com.urban.script.order: DEBUG
     com.alibaba.nacos: WARN
