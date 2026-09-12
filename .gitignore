@@ -86,3 +86,38 @@ _deliverables_*.md
 
 # ---------- 本地个人笔记（非项目文档） ----------
 blog_post.md
+
+# ---------- 本地 AI 工具 / 编辑器私有目录 ----------
+.workbuddy/
+.trae/
+.claude/
+.cursor/
+
+# ---------- 环境变量（含真实密钥，禁止提交；模板 .env.example 需提交） ----------
+.env
+.env.local
+!.env.example
+
+# ---------- Office 临时锁文件 ----------
+~$*
+*.tmp
+
+# ---------- 根目录临时验证脚本（一次性调试产物，不展示） ----------
+# 注意：benchmark_stock.js / make_bench_session.js / smoke_mainchain.js 属正式展示脚本，
+#      已由 scripts/README.md 说明，需入库，故不在此忽略
+_verify*.js
+_full_test.js
+_test_report.txt
+
+# ---------- 面试资料（个人资料，不上传） ----------
+# 注：interview_shots/ 已决定保留在仓库中（README 配图素材），故不在此忽略
+build_interview_docx.py
+*面试问答*.html
+*背诵版*.docx
+
+# ---------- 面试准备材料（个人后台资料，禁止随仓库公开） ----------
+# INTERVIEW_PITCH.md = 面试讲稿 + 追问防守话术 + "绝对不要说的话"（等于底牌清单）
+# INTERVIEW_ASSETS.md = "面试时怎么说"的截图提示
+# 这两份被面试官翻到会很尴尬（暴露准备痕迹），且 PITCH 里明写了项目弱点，故仅本地保留
+docs/INTERVIEW_PITCH.md
+docs/INTERVIEW_ASSETS.md
