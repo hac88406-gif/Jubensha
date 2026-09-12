@@ -26,6 +26,10 @@ import java.util.List;
  * <p>
  * 设计策略：
  *   <ol>
+ *     <li><b>⓪ 安全前置</b>：无条件剥离入站请求中客户端自带的 {@code X-User-Id} /
+ *         {@code X-User-Role}，保证身份头只可能由本过滤器注入。若不清除，
+ *         下游 {@code RoleAspect} 无法分辨该头是「网关注入」还是「请求方伪造」，
+ *         攻击者无需登录、自带 {@code X-User-Role: ROLE_SHOP_OWNER} 即可越权</li>
  *     <li>白名单路径（注册 / 登录 / agent 渠道 / Feign 内部接口）—— 直接放行，不检查 Header</li>
  *     <li>其他路径：
  *       <ul>
@@ -60,6 +64,16 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
      * 任何人不用登录就能调 AI 对话。只放行 /agent/health 和 /agent/internal/**。
      * </p>
      */
+    /**
+     * 网关注入给下游的身份头 —— 下游 `RoleAspect` 据此鉴权。
+     * <p>
+     * 🔒 安全红线：这两个头只允许由本过滤器在验签通过后写入；
+     * 客户端自带的同名头必须在入口处剥离（见 {@link #filter} 的 ⓪ 步），
+     * 否则可被伪造用于越权。
+     */
+    private static final String HEADER_USER_ID = "X-User-Id";
+    private static final String HEADER_USER_ROLE = "X-User-Role";
+
     private static final List<String> WHITE_LIST = List.of(
             "/api/user/register",
             "/api/user/login",
@@ -78,17 +92,30 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
 
-        // ========== ① 白名单：直接放行 ==========
+        // ========== ⓪ 安全前置：无条件剥离客户端可能伪造的身份头 ==========
+        // 身份头（X-User-Id / X-User-Role）只允许由本过滤器在验签通过后注入，
+        // 客户端自带的同名头必须清除 —— 否则下游 RoleAspect 无法分辨该头
+        // 是「网关注入」还是「请求方伪造」，攻击者无需登录、只要自带
+        // "X-User-Role: ROLE_SHOP_OWNER" 即可越权。
+        // ⚠️ 必须在所有分支之前执行，包括白名单分支与无 token 的透传分支。
+        ServerHttpRequest sanitized = request.mutate()
+                .headers(headers -> {
+                    headers.remove(HEADER_USER_ID);
+                    headers.remove(HEADER_USER_ROLE);
+                })
+                .build();
+
+        // ========== ① 白名单：直接放行（身份头已剥离）==========
         if (isWhiteListed(path)) {
             log.debug("[JwtAuth] 白名单放行: {}", path);
-            return chain.filter(exchange);
+            return chain.filter(exchange.mutate().request(sanitized).build());
         }
 
         // ========== ② 无 Authorization Header → 透传（让下游 @RequireRole 决定）==========
         String auth = request.getHeaders().getFirst("Authorization");
         if (auth == null || !auth.startsWith("Bearer ")) {
             log.debug("[JwtAuth] 无 token, 透传给下游: {}", path);
-            return chain.filter(exchange);
+            return chain.filter(exchange.mutate().request(sanitized).build());
         }
 
         // ========== ③ 有 token → 校验 + 注入 Header ==========
@@ -101,13 +128,14 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
         Long userId = JwtUtil.getUserId(token);
         String role = JwtUtil.getRole(token);
 
-        ServerHttpRequest mutated = request.mutate()
-                .header("X-User-Id", userId == null ? "" : String.valueOf(userId))
-                .header("X-User-Role", role == null ? "" : role)
+        // 在已剥离伪造头的请求上注入，确保身份头有且只有一个来源（即本过滤器）
+        ServerHttpRequest authenticated = sanitized.mutate()
+                .header(HEADER_USER_ID, userId == null ? "" : String.valueOf(userId))
+                .header(HEADER_USER_ROLE, role == null ? "" : role)
                 .build();
 
         log.debug("[JwtAuth] 校验通过, userId={}, role={}, path={}", userId, role, path);
-        return chain.filter(exchange.mutate().request(mutated).build());
+        return chain.filter(exchange.mutate().request(authenticated).build());
     }
 
     /** 判断路径是否在白名单 */
