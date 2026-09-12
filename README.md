@@ -4,7 +4,7 @@
 
 ***
 
-## 🎯 项目亮点（面试重点）
+## 🎯 项目亮点
 
 ### 亮点 1 · 高并发抢位零超卖：Redis+Lua vs MySQL 乐观锁
 
@@ -282,5 +282,4 @@ node smoke_mainchain.js
 | 项目叙事（面试讲稿） | [docs/PROJECT\_NARRATIVE.md](docs/PROJECT_NARRATIVE.md) | 问题→方案→结果结构，面试自我介绍用               |
 | 简历亮点摘要     | [docs/RESUME\_HIGHLIGHTS.md](docs/RESUME_HIGHLIGHTS.md) | 每条亮点都有量化结果                       |
 | 脚本说明       | [scripts/README.md](scripts/README.md)                  | 根目录 benchmark / smoke 脚本的用途和运行方式 |
-| 工程化改造记录    | [CHANGELOG\_工程化改造.md](CHANGELOG_工程化改造.md)               | 上传 GitHub 前的整理追溯清单（零源码变更）        |
 
