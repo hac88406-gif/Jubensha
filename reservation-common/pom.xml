@@ -54,6 +54,21 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Servlet API: TraceIdFilter 编译需要, 运行时由各业务服务 starter-web / starter-tomcat 提供 -->
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- @ConditionalOnWebApplication / @ConditionalOnClass: TraceIdFilter 只在 Servlet 服务注册,
+             防止污染纯 WebFlux 的 reservation-gateway 网关 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- OpenFeign: 仅编译期需要 RequestInterceptor 接口，版本由 Spring Cloud BOM 管理 -->
         <dependency>
             <groupId>org.springframework.cloud</groupId>

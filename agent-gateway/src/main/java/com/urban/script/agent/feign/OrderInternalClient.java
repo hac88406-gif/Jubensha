@@ -9,7 +9,9 @@ import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,15 +36,28 @@ public interface OrderInternalClient {
 
     /**
      * 按 orderNo 查订单详情（order-service: OrderController /order/internal/orderNo/{orderNo}）
+     *
+     * <p>透传 X-User-Id / X-User-Role 给 order-service：若调用方带了明确身份
+     * 且不是店长，下游会强制校验"只能查本人订单"，防 AI 越权查他人订单。
      */
     @GetMapping("/order/internal/orderNo/{orderNo}")
-    R<OrderRes> getOrder(@PathVariable("orderNo") String orderNo);
+    R<OrderRes> getOrder(@PathVariable("orderNo") String orderNo,
+                         @RequestHeader(value = "X-User-Id", required = false) Long userId,
+                         @RequestHeader(value = "X-User-Role", required = false) String role);
 
     /**
      * 按 X-User-Id 查用户所有订单（order-service: OrderController /order/internal/my）
      */
     @GetMapping("/order/internal/my")
     R<List<OrderRes>> myOrders(@RequestHeader("X-User-Id") Long userId);
+
+    /**
+     * 按 orderNo 取消订单（order-service: OrderController /order/internal/cancel）
+     * <p>透传 X-User-Id 做归属校验：仅能取消本人且 status=0 待支付的订单（幂等）。
+     */
+    @PostMapping("/order/internal/cancel")
+    R<Void> cancelOrder(@RequestParam("orderNo") String orderNo,
+                        @RequestHeader(value = "X-User-Id", required = false) Long userId);
 
     // ========================================================================
     // DTO（与 order-service 的 OrderRes 字段对齐，取 agent 需要的子集）
@@ -76,11 +91,15 @@ public interface OrderInternalClient {
 
             return new OrderInternalClient() {
                 @Override
-                public R<OrderRes> getOrder(String orderNo) {
+                public R<OrderRes> getOrder(String orderNo, Long userId, String role) {
                     return R.fail(503, "订单服务暂不可用，请稍后再试");
                 }
                 @Override
                 public R<List<OrderRes>> myOrders(Long userId) {
+                    return R.fail(503, "订单服务暂不可用，请稍后再试");
+                }
+                @Override
+                public R<Void> cancelOrder(String orderNo, Long userId) {
                     return R.fail(503, "订单服务暂不可用，请稍后再试");
                 }
             };

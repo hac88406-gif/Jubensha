@@ -97,16 +97,22 @@ public class StockService {
     @PostConstruct
     public void preloadLuaScripts() {
         log.info("[StockService] 开始预加载 Lua 脚本到 Redis ...");
-
-        LUA_DECR_SHA = stringRedisTemplate.execute((RedisCallback<String>) conn ->
-                conn.scriptLoad(LUA_DECR_SCRIPT.getBytes(StandardCharsets.UTF_8))
-        );
-        LUA_ROLLBACK_SHA = stringRedisTemplate.execute((RedisCallback<String>) conn ->
-                conn.scriptLoad(LUA_ROLLBACK_SCRIPT.getBytes(StandardCharsets.UTF_8))
-        );
-
-        log.info("[StockService] Lua 预加载完成 —— decr.sha={}, rollback.sha={}",
-                LUA_DECR_SHA, LUA_ROLLBACK_SHA);
+        try {
+            LUA_DECR_SHA = stringRedisTemplate.execute((RedisCallback<String>) conn ->
+                    conn.scriptLoad(LUA_DECR_SCRIPT.getBytes(StandardCharsets.UTF_8))
+            );
+            LUA_ROLLBACK_SHA = stringRedisTemplate.execute((RedisCallback<String>) conn ->
+                    conn.scriptLoad(LUA_ROLLBACK_SCRIPT.getBytes(StandardCharsets.UTF_8))
+            );
+            log.info("[StockService] Lua 预加载完成 —— decr.sha={}, rollback.sha={}",
+                    LUA_DECR_SHA, LUA_ROLLBACK_SHA);
+        } catch (Exception e) {
+            // 启动时 Redis 挂了也不让 Bean 创建失败。
+            // EVALSHA 找不到 SHA1 会抛 NOSCRIPT，evalDecr/evalRollback 里已经有重 LOAD 的自愈逻辑，
+            // 第一次扣减请求进 evalDecr 时会自动 SCRIPT LOAD 补救。
+            log.warn("[StockService] Lua 脚本预加载失败（Redis 可能不可用），将在首次扣减时自愈: {}",
+                    e.getMessage());
+        }
     }
 
     // ========================================================================

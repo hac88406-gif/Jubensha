@@ -122,7 +122,6 @@ public class UserServiceImpl implements UserService {
             case 0 -> "ROLE_PLAYER";
             case 1 -> "ROLE_DM";
             case 2 -> "ROLE_SHOP_OWNER";
-            case 3 -> "ROLE_ADMIN";
             default -> "ROLE_PLAYER";
         };
     }

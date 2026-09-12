@@ -69,7 +69,7 @@ public class ScriptController {
     // ===================== 店长管理端 =====================
 
     @Operation(summary = "剧本列表（管理端，可查全部状态）")
-    @RequireRole({"ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @RequireRole("ROLE_SHOP_OWNER")
     @GetMapping("/manage/list")
     public R<List<ScriptRes>> manageList(
             @RequestParam(required = false) Long shopId,
@@ -88,8 +88,8 @@ public class ScriptController {
         return R.ok(scriptService.listScripts(q));
     }
 
-    @Operation(summary = "创建剧本（店长/管理员）")
-    @RequireRole({"ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @Operation(summary = "创建剧本（店长）")
+    @RequireRole("ROLE_SHOP_OWNER")
     @PostMapping("/create")
     public R<Long> create(@Valid @RequestBody ScriptCreateReq req,
                           @RequestHeader(value = "X-User-Id", required = false) Long userId,
@@ -97,8 +97,8 @@ public class ScriptController {
         return R.ok("创建成功", scriptService.createScript(req));
     }
 
-    @Operation(summary = "更新剧本（店长/管理员）")
-    @RequireRole({"ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @Operation(summary = "更新剧本（店长）")
+    @RequireRole("ROLE_SHOP_OWNER")
     @PutMapping("/{id}/update")
     public R<Void> update(@PathVariable Long id,
                           @Valid @RequestBody ScriptCreateReq req,
@@ -108,8 +108,8 @@ public class ScriptController {
         return R.ok();
     }
 
-    @Operation(summary = "下架剧本（店长/管理员，逻辑删除 status→0）")
-    @RequireRole({"ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @Operation(summary = "下架剧本（店长，逻辑删除 status→0）")
+    @RequireRole("ROLE_SHOP_OWNER")
     @DeleteMapping("/{id}/delete")
     public R<Void> delete(@PathVariable Long id,
                           @RequestHeader(value = "X-User-Id", required = false) Long userId,
@@ -139,5 +139,18 @@ public class ScriptController {
         q.setPlayerCnt(playerCnt);
         q.setStatus(1);  // 内部接口也只查上架的
         return R.ok(scriptService.listScripts(q));
+    }
+
+    /**
+     * 内部剧本详情（agent-gateway 代理 Python Agent 调用）
+     * <p>与玩家端 /script/{id} 同逻辑：返回完整富化字段（background / tags / mark /
+     * maleNum / femaleNum / unknownNum / characters），供 AI 陪练的剧情问答与角色介绍工具使用。
+     * <p>列表接口（internalList）剥离了 characters 避免 payload 过大，详情按需取。
+     */
+    @Operation(summary = "内部：剧本详情（agent-gateway / agent 用）", hidden = true)
+    @GetMapping("/internal/{id}")
+    public R<ScriptRes> internalGet(@PathVariable Long id,
+                                    @RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
+        return R.ok(scriptService.getScript(id));
     }
 }

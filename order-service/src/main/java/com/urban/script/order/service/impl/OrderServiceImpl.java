@@ -11,6 +11,7 @@ import com.urban.script.order.feign.ShopClient;
 import com.urban.script.order.mapper.OrderMapper;
 import com.urban.script.order.mapper.SessionMapper;
 import com.urban.script.order.producer.DelayCancelProducer;
+import com.urban.script.order.service.RateLimitService;
 import com.urban.script.order.service.OrderService;
 import com.urban.script.order.service.StockService;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,7 @@ import org.springframework.data.redis.RedisSystemException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -70,6 +72,7 @@ public class OrderServiceImpl implements OrderService {
     private final RedissonClient redissonClient;
     private final StockService stockService;
     private final DelayCancelProducer delayCancelProducer;
+    private final RateLimitService rateLimitService;
 
     // ========================================================================
     // ① 创建预约订单 —— Redisson 锁 + Feign 校验 + Redis+Lua 扣减 + MySQL 降级
@@ -83,6 +86,15 @@ public class OrderServiceImpl implements OrderService {
         }
         if (req.getPlayerCnt() == null || req.getPlayerCnt() < 1) {
             req.setPlayerCnt(1);  // 默认 1
+        }
+
+        // === ⑥ 抢位防刷限流（P1） ===
+        // 固定窗口计数器：同 60s 内同一用户最多 50 次下单尝试。
+        // 防"单号党"脚本高频刷下单接口把 MySQL 降级路径打挂；
+        // Redis 异常时限流器自动放行，不影响主链路。钥匙维度按 userId 天然分散。
+        if (!rateLimitService.tryAcquire("order:" + userId, 50, 60)) {
+            log.warn("[createOrder] 操作过于频繁，被限流拦截 userId={}", userId);
+            throw new BusinessException("操作过于频繁，请稍后再试");
         }
 
         // === ① Redisson 分布式锁 ===
@@ -115,10 +127,20 @@ public class OrderServiceImpl implements OrderService {
         }
 
         try {
-            // === ② Feign 校验场次 ===
+            // === ② 业务唯一性校验：一场次一人只能下一单 ===
+            // Redisson 锁只防同一时刻的并发提交，锁释放后再次请求会放行；
+            // 这里再查一次 DB 兜底（status IN 0/1/3 即待支付/已支付/已完成的都禁止再下）。
+            OrderInfo existing = orderMapper.selectActiveByUserAndSession(userId, req.getSessionId());
+            if (existing != null) {
+                log.warn("[createOrder] 重复下单拦截: userId={}, sessionId={}, existingOrderNo={}, existingStatus={}",
+                        userId, req.getSessionId(), existing.getOrderNo(), existing.getStatus());
+                throw new BusinessException("您已预约过该场次，请前往'我的订单'查看或取消后再预约");
+            }
+
+            // === ③ Feign 校验场次 ===
             ShopClient.SessionFeignRes session = validateSession(req.getSessionId());
 
-            // === ③ Redis+Lua 原子扣减（含降级 MySQL 乐观锁）===
+            // === ④ Redis+Lua 原子扣减（含降级 MySQL 乐观锁）===
             boolean redisDeducted = tryDecrStock(session, req.getPlayerCnt());
 
             // === ④ MySQL 创建订单 ===
@@ -139,7 +161,16 @@ public class OrderServiceImpl implements OrderService {
             // Redis 路径：Redis 已扣减，MySQL 这里同步一下
             // MySQL 降级路径：incrementBookedIfEnough 已经扣过了，这里不再扣
             if (redisDeducted) {
-                sessionMapper.incrementBooked(req.getSessionId(), req.getPlayerCnt());
+                try {
+                    sessionMapper.incrementBooked(req.getSessionId(), req.getPlayerCnt());
+                } catch (Exception e) {
+                    // 库存已由 Redis Lua 原子扣减（权威），MySQL booked 只是最终同步。
+                    // 同步失败不能阻断下单成功返回——否则出现"订单已落库、Redis 已扣，但前端收到失败"
+                    // 的尴尬状态；差额由超时关单/取消的回滚，以及 forceRefreshBooked 自愈时纠正。
+                    log.warn("[createOrder] MySQL booked 同步失败（Redis 已扣减，不影响下单），"
+                                    + "orderNo={}, sessionId={}, reason={}",
+                            order.getOrderNo(), req.getSessionId(), e.getMessage());
+                }
             }
 
             // === ⑤ 发 RabbitMQ 延迟消息 ===
@@ -202,6 +233,10 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // 场次已过（session_date + end_time < now）
+        if (session.getSessionDate() == null || session.getStartTime() == null || session.getEndTime() == null) {
+            // 防御：Feign 数据理论非空，缺失时直接拦截，避免下方 LocalDateTime.of 抛 NPE
+            throw new BusinessException("场次时间信息不完整，无法预约");
+        }
         LocalDateTime sessionEnd = LocalDateTime.of(session.getSessionDate(), session.getEndTime());
         if (sessionEnd.isBefore(LocalDateTime.now())) {
             throw new BusinessException("场次已结束，无法预约");
@@ -270,6 +305,12 @@ public class OrderServiceImpl implements OrderService {
         order.setScriptId(session.getScriptId());
         order.setPlayerCnt(req.getPlayerCnt());
         order.setPlayTime(LocalDateTime.of(session.getSessionDate(), session.getStartTime()));
+        // 订单金额 = 剧本单价 × 参与人数（支付闭环的前提，price 来自 shop-service Feign）
+        // 剧本单价缺失（历史数据/异常）时兜底 0，避免下单失败
+        BigDecimal amount = session.getPrice() == null
+                ? BigDecimal.ZERO
+                : session.getPrice().multiply(BigDecimal.valueOf(req.getPlayerCnt()));
+        order.setAmount(amount);
         order.setPayMethod(0);    // 未支付
         order.setStatus(0);       // 待支付（Redis 已扣库存，保留 15min）
         order.setCancelReason(null);
@@ -286,25 +327,28 @@ public class OrderServiceImpl implements OrderService {
     public void cancelOrder(Long orderId, String cancelReason, String operator) {
         log.info("[cancelOrder] 开始取消 orderId={}, reason={}, operator={}", orderId, cancelReason, operator);
 
-        // ① 查订单
+        // ① 查订单（拿 orderNo / sessionId / playerCnt 供后续回滚使用）
         OrderInfo order = orderMapper.selectById(orderId);
         if (order == null) {
             throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "订单不存在");
         }
 
-        // ② 幂等保护：只有待支付(0) 的订单才能取消
-        // 已支付(1) / 已完成(3) / 已取消(2) 都跳过
+        // ② 快速路径：只有待支付(0) 的订单才可能被取消，其他状态直接幂等跳过
         if (order.getStatus() != null && order.getStatus() != 0) {
             log.info("[cancelOrder] 订单状态非待支付，跳过。orderId={}, currentStatus={}", orderId, order.getStatus());
             return;
         }
 
-        // ③ 更新 MySQL 状态
-        OrderInfo update = new OrderInfo();
-        update.setId(orderId);
-        update.setStatus(2);      // 已取消
-        update.setCancelReason(cancelReason);
-        orderMapper.updateById(update);
+        // ③ 原子取消：UPDATE ... WHERE status=0（真正的竞态防线）
+        //    上面的 status 检查只是快速路径减负，竞态窗口由原子条件兜底：
+        //    - 两个取消并发 → 只有一个 UPDATE 返回 1，另一个返回 0 幂等跳过（不会双重回滚 booked）
+        //    - 支付回调先成功(0→1) → 本 UPDATE 返回 0 行（不会把已支付订单误取消）
+        int rows = orderMapper.updateStatusToCancel(order.getOrderNo(), cancelReason);
+        if (rows == 0) {
+            log.info("[cancelOrder] 订单状态已变更（已支付/已取消/已完成），原子更新返回 0 行，幂等跳过 orderNo={}",
+                    order.getOrderNo());
+            return;
+        }
 
         // ④ 回滚 Redis booked
         try {
@@ -342,6 +386,54 @@ public class OrderServiceImpl implements OrderService {
         ShopClient.SessionFeignRes session = safeGetSession(order.getSessionId());
 
         return OrderRes.fromEntityWithSession(order, session);
+    }
+
+    /**
+     * 订单详情（带归属校验版）
+     *
+     * <p>修复越权：原 getOrderDetail 只看 id 不看归属，任意登录用户传他人订单 ID
+     * 就能读到金额/场次等敏感信息。此处强制：非店长的角色必须是订单本人。
+     */
+    @Override
+    public OrderRes getOrderDetailForUser(Long orderId, Long userId, String role) {
+        assertCanAccessOrder(orderId, userId, role);
+        return getOrderDetail(orderId);
+    }
+
+    /**
+     * 取消订单（带归属校验版）
+     *
+     * <p>修复越权：原 cancelOrder 不校验归属，玩家可恶意取消他人订单（触发库存回滚）。
+     * 非店长的角色必须是订单本人；校验通过后复用幂等取消主链路。
+     */
+    @Override
+    public void cancelOrderForUser(Long orderId, Long userId, String role,
+                                   String cancelReason, String operator) {
+        assertCanAccessOrder(orderId, userId, role);
+        cancelOrder(orderId, cancelReason, operator);
+    }
+
+    /**
+     * 订单归属校验公共逻辑：店长放行任意订单；其他角色必须是订单本人
+     *
+     * <p>店长后续如需按店铺维度收紧，可在此扩展（查场次所属店铺的 owner_id）。
+     */
+    private void assertCanAccessOrder(Long orderId, Long userId, String role) {
+        if (userId == null) {
+            throw new BusinessException(ResultCode.UNAUTHORIZED.getCode(), "未登录");
+        }
+        boolean staff = "ROLE_SHOP_OWNER".equalsIgnoreCase(role);
+        if (staff) {
+            return;
+        }
+        OrderInfo order = orderMapper.selectById(orderId);
+        if (order == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "订单不存在");
+        }
+        // order.getUserId() 为 null 时 equals 返回 false → 拒绝，绝对不让"空归属"通过
+        if (!order.getUserId().equals(userId)) {
+            throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权操作他人的订单");
+        }
     }
 
     // ========================================================================

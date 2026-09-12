@@ -3,6 +3,7 @@ package com.urban.script.shop.dto;
 import lombok.Builder;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 
@@ -29,6 +30,8 @@ public class SessionFeignRes {
     private Integer capacity;
     /** 已预约 */
     private Integer booked;
+    /** 剧本单价（供订单服务计算支付金额） */
+    private BigDecimal price;
     private Integer status;
 
     /** 场次是否开放（status=1） */

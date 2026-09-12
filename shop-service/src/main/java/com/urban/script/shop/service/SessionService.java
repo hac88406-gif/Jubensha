@@ -13,24 +13,31 @@ import java.util.List;
  */
 public interface SessionService {
 
-    /** 创建场次（含 DM 冲突检测） */
-    Long createSession(SessionCreateReq req);
+    /**
+     * 创建场次（含 DM 冲突检测 + 店长归属校验）
+     *
+     * @param req        创建请求
+     * @param operatorId 操作人（店长）用户 ID；ADMIN 角色可任意操作
+     * @param role       操作人角色（X-User-Role）
+     */
+    Long createSession(SessionCreateReq req, Long operatorId, String role);
 
     /**
      * 关闭场次。
      *
      * <p>关闭动作：
      * <ol>
-     *   <li>校验场次存在 + 开场前 2 小时外</li>
+     *   <li>校验场次存在 + 开场前 2 小时外 + 操作人属于该场次店铺</li>
      *   <li>UPDATE session_info SET status=0</li>
      *   <li>DELETE Redis session 库存 key</li>
      *   <li>发 RabbitMQ 消息通知 order-service 批量取消未支付订单</li>
      * </ol>
      *
      * @param sessionId  场次 ID
-     * @param operatorId 操作人（店长）用户 ID，写入消息体
+     * @param operatorId 操作人（店长）用户 ID；ADMIN 角色可任意操作
+     * @param role       操作人角色（X-User-Role）
      */
-    void closeSession(Long sessionId, Long operatorId);
+    void closeSession(Long sessionId, Long operatorId, String role);
 
     /** 查询某剧本未来 7 天的有效场次 */
     List<SessionRes> listSessionsByScript(Long scriptId);

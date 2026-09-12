@@ -55,11 +55,11 @@ public class ShopController {
         return R.ok(shopService.getShop(id));
     }
 
-    // ===================== 店长管理端（必须 ROLE_SHOP_OWNER / ROLE_ADMIN） =====================
+    // ===================== 店长管理端（必须 ROLE_SHOP_OWNER） =====================
 
     /** 创建门店 —— 店长 / 管理员可用 */
-    @Operation(summary = "创建门店（店长/管理员）")
-    @RequireRole({"ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @Operation(summary = "创建门店（店长）")
+    @RequireRole("ROLE_SHOP_OWNER")
     @PostMapping("/create")
     public R<Long> create(@Valid @RequestBody ShopCreateReq req,
                           @RequestHeader(value = "X-User-Id", required = false) Long userId,
@@ -73,7 +73,7 @@ public class ShopController {
 
     /** 管理端查询全部门店（含已关闭的） */
     @Operation(summary = "门店列表（管理端，可查全部状态）")
-    @RequireRole({"ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @RequireRole("ROLE_SHOP_OWNER")
     @GetMapping("/manage/list")
     public R<List<ShopRes>> manageList(@RequestParam(required = false) Integer status,
                                        @RequestHeader(value = "X-User-Id", required = false) Long userId,
@@ -81,8 +81,8 @@ public class ShopController {
         return R.ok(shopService.listShops(status));
     }
 
-    @Operation(summary = "更新门店（店长/管理员）")
-    @RequireRole({"ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @Operation(summary = "更新门店（店长）")
+    @RequireRole("ROLE_SHOP_OWNER")
     @PutMapping("/{id}/update")
     public R<Void> update(@PathVariable Long id,
                           @Valid @RequestBody ShopCreateReq req,
@@ -92,8 +92,8 @@ public class ShopController {
         return R.ok();
     }
 
-    @Operation(summary = "关闭门店（店长/管理员，逻辑删除 status→0）")
-    @RequireRole({"ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @Operation(summary = "关闭门店（店长，逻辑删除 status→0）")
+    @RequireRole("ROLE_SHOP_OWNER")
     @DeleteMapping("/{id}/delete")
     public R<Void> delete(@PathVariable Long id,
                           @RequestHeader(value = "X-User-Id", required = false) Long userId,

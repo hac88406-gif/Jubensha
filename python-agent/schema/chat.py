@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices
 
 
 # ==========================================================================
@@ -21,6 +21,11 @@ class Intent(str, Enum):
     QUERY_ORDER = "query_order"       # 查订单："我那个单怎么样了" / "ORDxxx"
     SEARCH_SCRIPT = "search_script"   # 找剧本："推荐适合 6 人玩的情感本"
     QUERY_MY_ORDERS = "query_my_orders"  # 我的订单列表
+    PLOT_QA = "plot_qa"               # 剧情问答（不剧透）："《XX》讲了什么" / "会不会剧透"
+    CHARACTER_INTRO = "character_intro"  # 角色介绍："介绍下《XX》的角色"
+    SIMILAR_SCRIPT = "similar_script"    # Neo4j 关系查询："和《XX》类似的剧本"
+    SMART_PICK = "smart_pick"            # 智能选本（Cypher 过滤）："帮我挑 6 人硬核带推理的本"
+    CANCEL_ORDER = "cancel_order"        # 取消订单："帮我把 ORDxxx 取消"
 
     # ---- 通用对话 ----
     CHAT = "chat"                     # 闲聊 / 咨询："剧本杀怎么玩" / "你好"
@@ -32,10 +37,25 @@ class Intent(str, Enum):
 # ==========================================================================
 
 class ChatRequest(BaseModel):
-    """FastAPI /api/chat 请求体 —— 与 agent-gateway 的 ChatRequest 字段对齐"""
-    user_id: Optional[int] = Field(default=None, description="用户 ID，会话记忆用")
+    """FastAPI /api/chat 请求体 —— 与 agent-gateway 的 ChatRequest 字段对齐
+
+    字段名兼容说明（2026-09-12 修复跨语言鉴权链路）：
+      Java ChatRequest 是驼峰字段（userId / sessionId），经 Feign 序列化为 JSON 后
+      传给本服务；直接调本服务 /api/chat 的场景又用下划线（user_id）。
+      Pydantic v2 默认不解析未知字段 → 网关转发时 userId 会被静默丢弃，
+      导致"查我的订单"报"请先登录"。这里用 AliasChoices 同时接受两种命名。
+    """
+    user_id: Optional[int] = Field(
+        default=None,
+        description="用户 ID，会话记忆用",
+        validation_alias=AliasChoices("user_id", "userId"),
+    )
     message: str = Field(..., description="用户最新输入")
-    session_id: Optional[int] = Field(default=None, description="可选：当前场次 ID")
+    session_id: Optional[int] = Field(
+        default=None,
+        description="可选：当前场次 ID",
+        validation_alias=AliasChoices("session_id", "sessionId"),
+    )
 
     # 历史消息（多轮上下文；Redis 会话记忆启用时可不传，Agent 自己查）
     history: Optional[list[dict[str, str]]] = None

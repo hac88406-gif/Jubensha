@@ -66,7 +66,7 @@ public class UserController {
      * </p>
      */
     @Operation(summary = "获取用户个人信息（需登录）")
-    @RequireRole(value = {"ROLE_PLAYER", "ROLE_DM", "ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @RequireRole(value = {"ROLE_PLAYER", "ROLE_DM", "ROLE_SHOP_OWNER"})
     @GetMapping("/profile")
     public R<UserProfileRes> profile(
             @Parameter(hidden = true)

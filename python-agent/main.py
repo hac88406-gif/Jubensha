@@ -28,6 +28,22 @@ from agent.graph import run_graph, get_graph
 from schema.chat import ChatRequest, ChatResponse
 
 # ==========================================================================
+# Nacos 注册说明（不自动注册，手动注册为持久实例 ephemeral=false）：
+#
+#   Python Agent 不自动注册 Nacos，原因：
+#   1. Nacos 跑在 Docker 里，TCP 探活宿主机 Python 进程不通
+#   2. LLM 延迟不可控，"端口可达"≠"服务可用"
+#   3. agent-gateway 硬编码调用，不走 Nacos 服务发现
+#
+#   如需注册（仅为服务拓扑可视化）：
+#   Invoke-RestMethod -Uri "http://localhost:8848/nacos/v1/ns/instance" -Method Post -Body @{
+#     serviceName="python-agent"; ip="127.0.0.1"; port=8000;
+#     groupName="DEFAULT_GROUP"; weight="1.0"; clusterName="DEFAULT";
+#     healthy="true"; enabled="true"; ephemeral="false"
+#   }
+# ==========================================================================
+
+# ==========================================================================
 # FastAPI App
 # ==========================================================================
 
@@ -53,11 +69,13 @@ app.add_middleware(
 
 @app.on_event("startup")
 def on_startup():
-    """启动时预构建 LangGraph（lazy init 也可以，但提前做可以早发现 import 问题）"""
+    """启动时预构建 LangGraph + 注册 Nacos"""
     logger.info(f"🚀 {config.APP_NAME} v{config.APP_VERSION} starting...")
     logger.info(f"   LLM: {config.LLM_MODEL} @ {config.LLM_BASE_URL}")
     logger.info(f"   Java Gateway: {config.JAVA_BASE_URL}")
     logger.info(f"   Redis: {config.REDIS_URL}")
+
+    # 1. 预构建 LangGraph
     try:
         get_graph()
         logger.info("✅ LangGraph 构建完成，服务就绪")

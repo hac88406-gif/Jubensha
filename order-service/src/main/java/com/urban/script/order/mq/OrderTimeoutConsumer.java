@@ -102,7 +102,16 @@ public class OrderTimeoutConsumer {
             }
 
             // MySQL 回滚（双重保险）
-            sessionMapper.decrementBookedIfEnough(sessionId, order.getPlayerCnt());
+            try {
+                sessionMapper.decrementBookedIfEnough(sessionId, order.getPlayerCnt());
+            } catch (Exception dbEx) {
+                // 订单此时已置为已取消(2)，消息即将 ACK：若这里抛异常导致重试，
+                // 重走的 UPDATE ... WHERE status=0 会返回 0 行——booked 永无机会再回滚。
+                // 因此这里捕获后记 error 日志，提示人工核查库存（正常 MySQL 下不会发生）。
+                log.error("[OrderTimeoutConsumer] MySQL 回滚 booked 失败，需人工核查库存 "
+                                + "orderNo={}, sessionId={}, playerCnt={}",
+                        orderNo, sessionId, order.getPlayerCnt(), dbEx);
+            }
 
             log.info("[OrderTimeoutConsumer] ✅ 超时关单成功 orderNo={}, sessionId={}, playerCnt={}",
                     orderNo, sessionId, order.getPlayerCnt());

@@ -22,12 +22,14 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -55,7 +57,7 @@ public class SessionServiceImpl implements SessionService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public Long createSession(SessionCreateReq req) {
+    public Long createSession(SessionCreateReq req, Long operatorId, String role) {
         // ① 校验剧本、店铺是否存在
         ScriptInfo script = scriptMapper.selectById(req.getScriptId());
         if (script == null) {
@@ -65,6 +67,9 @@ public class SessionServiceImpl implements SessionService {
         if (shop == null) {
             throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "店铺不存在");
         }
+
+        // ①.5 店长归属校验：非 ADMIN 只能给"自己拥有的店铺"创建场次
+        assertShopOwner(shop, operatorId, role);
 
         // ② DM 冲突检测（仅当 dmId 不为空时）
         if (req.getDmId() != null) {
@@ -94,6 +99,31 @@ public class SessionServiceImpl implements SessionService {
         session.setStatus(1);
         sessionMapper.insert(session);
 
+        // ⑤ 主动写 Redis 库存缓存（项目约定：场次创建时必须写入 session:{id} HASH）
+        //    防止新场次 ID 复用了尚未过期的旧缓存 key → 下单按旧 capacity/booked 扣减（数据错乱）
+        //    key 结构与 order-service StockService 的 lazyInit 完全一致：HASH {capacity, booked}
+        String redisKey = RedisKeyConstant.SESSION_KEY + session.getId();
+        try {
+            Map<String, String> stockFields = new HashMap<>(4);
+            stockFields.put("capacity", String.valueOf(session.getCapacity()));
+            stockFields.put("booked", "0");
+            stringRedisTemplate.opsForHash().putAll(redisKey, stockFields);
+
+            // 动态 TTL：场次结束时间 + 24h（与 order-service StockService.calculateTtl 约定一致），
+            // 最少 60 秒防止立即过期
+            long ttlSeconds = ChronoUnit.SECONDS.between(
+                    LocalDateTime.now(),
+                    LocalDateTime.of(session.getSessionDate(), session.getEndTime())) + 86400L;
+            stringRedisTemplate.expire(redisKey, Math.max(ttlSeconds, 60L), TimeUnit.SECONDS);
+
+            log.info("[createSession] 已写入 Redis 库存缓存 key={}, capacity={}, booked=0, ttl={}s",
+                    redisKey, session.getCapacity(), ttlSeconds);
+        } catch (Exception e) {
+            // Redis 不可用不影响场次创建：order-service 侧 decrStock 发现 key 不存在会 lazyInit 自愈
+            log.warn("[createSession] 写 Redis 库存缓存失败（不影响场次创建，下单时 lazyInit 会自愈），key={}, reason={}",
+                    redisKey, e.getMessage());
+        }
+
         log.info("[createSession] id={}, scriptId={}, shopId={}, dmId={}, date={} {}-{}",
                 session.getId(), session.getScriptId(), session.getShopId(),
                 session.getDmId(), session.getSessionDate(), session.getStartTime(), session.getEndTime());
@@ -104,7 +134,7 @@ public class SessionServiceImpl implements SessionService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void closeSession(Long sessionId, Long operatorId) {
+    public void closeSession(Long sessionId, Long operatorId, String role) {
         // ① 查场次
         SessionInfo session = sessionMapper.selectById(sessionId);
         if (session == null) {
@@ -113,6 +143,10 @@ public class SessionServiceImpl implements SessionService {
         if (session.getStatus() == 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "场次已关闭");
         }
+
+        // ①.5 店长归属校验：非 ADMIN 只能关闭"自己店铺"的场次
+        ShopInfo shop = shopMapper.selectById(session.getShopId());
+        assertShopOwner(shop, operatorId, role);
 
         // ② 开场前 2 小时内不可关闭
         //    场次开始时刻 = sessionDate + startTime
@@ -154,6 +188,22 @@ public class SessionServiceImpl implements SessionService {
         rabbitTemplate.convertAndSend(EXCHANGE_SESSION_CLOSE, ROUTING_KEY_ORDER_CANCEL, json);
         log.info("[closeSession] 已发送 MQ 消息 exchange={}, routingKey={}, payload={}",
                 EXCHANGE_SESSION_CLOSE, ROUTING_KEY_ORDER_CANCEL, json);
+    }
+
+    /**
+     * 店长归属校验公共逻辑：店长只能操作自己名下店铺（owner_id 匹配）
+     *
+     * <p>修复越权：原 createSession/closeSession 不校验操作人与店铺的从属关系，
+     * 任何店长都能操作任意店铺的场次。此处强制归属，防横向越权。
+     */
+    private void assertShopOwner(ShopInfo shop, Long operatorId, String role) {
+        if (operatorId == null || shop == null || shop.getOwnerId() == null
+                || !shop.getOwnerId().equals(operatorId)) {
+            log.warn("[SessionServiceImpl] 店长越权拦截 operatorId={}, role={}, shopId={}, ownerId={}",
+                    operatorId, role, shop != null ? shop.getId() : null,
+                    shop != null ? shop.getOwnerId() : null);
+            throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "只能操作自己店铺的场次");
+        }
     }
 
     // ===================== 查询：未来 7 天有效场次 =====================
@@ -199,6 +249,15 @@ public class SessionServiceImpl implements SessionService {
         if (s == null) {
             throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "场次不存在");
         }
+
+        // 附带剧本单价：order-service 下单时据此计算支付金额（amount = price × playerCnt）
+        // 剧本不存在（数据异常）时 price 传 null，由 order-service 侧兜底为 0
+        BigDecimal price = null;
+        ScriptInfo script = scriptMapper.selectById(s.getScriptId());
+        if (script != null) {
+            price = script.getPrice();
+        }
+
         return SessionFeignRes.builder()
                 .id(s.getId())
                 .scriptId(s.getScriptId())
@@ -209,6 +268,7 @@ public class SessionServiceImpl implements SessionService {
                 .endTime(s.getEndTime())
                 .capacity(s.getCapacity())
                 .booked(s.getBooked() == null ? 0 : s.getBooked())
+                .price(price)
                 .status(s.getStatus())
                 .build();
     }

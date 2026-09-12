@@ -1,0 +1,99 @@
+/* =========================================================================
+ * 全局样式：锂电新能源 · 科技绿（A 档）
+ *   主色  emerald #0d9488  辅色  tech cyan #06b6d4 / amber #f59e0b
+ *   中性  slate 系         圆角  14px      阴影  0 8px 24px rgba(13,148,136,.08)
+ * ========================================================================= */
+
+/* ---------- Element Plus 主题变量覆盖（科技绿） ---------- */
+:root {
+  /* 主色系 */
+  --el-color-primary: #0d9488;
+  --el-color-primary-light-3: #14b8a6;
+  --el-color-primary-light-5: #2dd4bf;
+  --el-color-primary-light-7: #5eead4;
+  --el-color-primary-light-8: #99f6e4;
+  --el-color-primary-light-9: #f0fdfa;
+  --el-color-primary-dark-2: #0f766e;
+  /* 功能色 */
+  --el-color-success: #10b981;
+  --el-color-warning: #f59e0b;
+  --el-color-danger: #ef4444;
+  --el-color-info: #64748b;
+  /* 圆角统一 14px */
+  --el-border-radius-base: 14px;
+  --el-border-radius-small: 10px;
+  --el-border-radius-round: 9999px;
+
+  /* 全局色板 */
+  --color-bg-base: #f8fafc;        /* 页面底色（slate-50） */
+  --color-card: #ffffff;           /* 卡片白 */
+  --color-border: #e2e8f0;         /* slate-200 边框 */
+  --color-text-main: #0f172a;      /* slate-900 主文本 */
+  --color-text-sub: #64748b;       /* slate-500 次文本 */
+  --color-emerald: #0d9488;
+  --color-cyan: #06b6d4;
+  --color-amber: #f59e0b;
+  --radius: 14px; /* 统一圆角（页面多处 var(--radius) 引用，此前缺失未生效） */
+  --shadow-soft: 0 8px 24px rgba(13, 148, 136, 0.08); /* 柔和投影 */
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-bg-base);
+  color: var(--color-text-main);
+  font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, -apple-system,
+    'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 通用卡片 ---------- */
+.u-card {
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-soft);
+}
+
+/* ---------- 通用页面标题 ---------- */
+.u-page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-text-main);
+  margin: 0 0 4px;
+}
+
+.u-page-sub {
+  font-size: 13px;
+  color: var(--color-text-sub);
+  margin: 0 0 16px;
+}
+
+/* ---------- Element Plus 细节微调 ---------- */
+.el-card {
+  border-radius: 14px;
+  border-color: var(--color-border);
+  box-shadow: var(--shadow-soft);
+}
+
+.el-button {
+  border-radius: 10px;
+}
+
+/* 滚动条（深色细条，观感统一） */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

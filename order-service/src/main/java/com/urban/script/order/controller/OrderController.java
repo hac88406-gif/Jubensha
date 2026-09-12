@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -67,22 +68,24 @@ public class OrderController {
         return R.ok(list);
     }
 
-    @Operation(summary = "订单详情（玩家/店主/管理员）")
-    @RequireRole({"ROLE_PLAYER", "ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @Operation(summary = "订单详情（玩家/店长）")
+    @RequireRole({"ROLE_PLAYER", "ROLE_SHOP_OWNER"})
     @GetMapping("/{id}")
     public R<OrderRes> get(@PathVariable Long id,
                            @RequestHeader(value = "X-User-Id", required = false) Long userId,
                            @RequestHeader(value = "X-User-Role", required = false) String role) {
-        return R.ok(orderService.getOrderDetail(id));
+        // 带归属校验：玩家只能看自己的订单，店长/管理员可看任意订单
+        return R.ok(orderService.getOrderDetailForUser(id, userId, role));
     }
 
-    @Operation(summary = "取消订单（玩家主动取消 / 店主可取消自己店铺场次的订单）")
-    @RequireRole({"ROLE_PLAYER", "ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @Operation(summary = "取消订单（玩家主动取消 / 店长可取消自己店铺场次的订单）")
+    @RequireRole({"ROLE_PLAYER", "ROLE_SHOP_OWNER"})
     @DeleteMapping("/{id}")
     public R<Void> cancel(@PathVariable Long id,
                           @RequestHeader(value = "X-User-Id", required = false) Long userId,
                           @RequestHeader(value = "X-User-Role", required = false) String role) {
-        orderService.cancelOrder(id, "USER_CANCEL", role + ":" + userId);
+        // 带归属校验：玩家只能取消自己的订单（防恶意取消他人订单触发库存回滚）
+        orderService.cancelOrderForUser(id, userId, role, "USER_CANCEL", role + ":" + userId);
         return R.ok("取消成功", null);
     }
 
@@ -98,14 +101,22 @@ public class OrderController {
         return R.ok(orderService.getOrderDetail(id));
     }
 
-    /** 内部：按 orderNo 查订单（agent-gateway 代理 Python Agent 用） */
+    /** 内部：按 orderNo 查订单（agent-gateway 代理 Python Agent 用，带可选归属校验） */
     @Operation(summary = "订单详情（内部 Feign，按 orderNo 查）", hidden = true)
     @GetMapping("/internal/orderNo/{orderNo}")
     public R<OrderRes> getByOrderNo(@PathVariable String orderNo,
+                                    @RequestHeader(value = "X-User-Id", required = false) Long userId,
+                                    @RequestHeader(value = "X-User-Role", required = false) String role,
                                     @RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
         OrderInfo order = orderMapper.selectByOrderNo(orderNo);
         if (order == null) {
             throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "订单不存在");
+        }
+        // AI 通道归属校验：若调用方带上了明确身份且不是店长，只允许查本人订单
+        // （Python order_tool.query_order 带上 X-User-Id 后，可防止"AI 帮任意人查任意单"）
+        boolean staff = "ROLE_SHOP_OWNER".equalsIgnoreCase(role);
+        if (userId != null && !staff && !order.getUserId().equals(userId)) {
+            throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "无权查看他人的订单");
         }
         ShopClient.SessionFeignRes session = shopClient.getSession(order.getSessionId()).getData();
         return R.ok(OrderRes.fromEntityWithSession(order, session));
@@ -118,5 +129,21 @@ public class OrderController {
                                         @RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
         List<OrderRes> list = orderService.listOrdersByUserId(userId);
         return R.ok(list);
+    }
+
+    /** 内部：按 orderNo 取消订单（agent-gateway 代理 Python Agent 用，带归属校验） */
+    @Operation(summary = "取消订单（内部 Feign，按 orderNo 取消，AI 用）", hidden = true)
+    @PostMapping("/internal/cancel")
+    public R<Void> internalCancel(@RequestParam String orderNo,
+                                  @RequestHeader(value = "X-User-Id", required = false) Long userId,
+                                  @RequestHeader(value = "X-User-Role", required = false) String role,
+                                  @RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
+        OrderInfo order = orderMapper.selectByOrderNo(orderNo);
+        if (order == null) {
+            throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "订单不存在");
+        }
+        // 复用玩家取消的归属校验 + 幂等取消逻辑（仅 status=0 待支付可取消，其余状态静默跳过）
+        orderService.cancelOrderForUser(order.getId(), userId, role, "USER_CANCEL", "agent:" + userId);
+        return R.ok("取消成功", null);
     }
 }

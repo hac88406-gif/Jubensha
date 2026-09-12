@@ -26,7 +26,7 @@ public class LoginRes {
     private Long userId;
 
     /**
-     * 角色字符串，格式 "ROLE_PLAYER" / "ROLE_DM" / "ROLE_SHOP_OWNER" / "ROLE_ADMIN"
+     * 角色字符串，格式 "ROLE_PLAYER" / "ROLE_DM" / "ROLE_SHOP_OWNER"
      * <p>Gateway 从 JWT 解析 role claim 得到，传给下游服务做 RBAC
      */
     @Schema(description = "角色编码（如 ROLE_PLAYER）", example = "ROLE_PLAYER")

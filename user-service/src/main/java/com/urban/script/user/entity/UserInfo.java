@@ -45,7 +45,7 @@ public class UserInfo implements Serializable {
     /** 头像 URL（可选） */
     private String avatar;
 
-    /** 角色：0=玩家 1=DM 2=店长 3=管理员 */
+    /** 角色：0=玩家 1=DM 2=店长 */
     private Integer role;
 
     /** 账号状态：0=禁用 1=正常 */

@@ -4,6 +4,7 @@ import com.urban.script.agent.feign.ChatRequest;
 import com.urban.script.agent.feign.ChatResponse;
 import com.urban.script.agent.feign.OrderInternalClient;
 import com.urban.script.agent.feign.PythonAgentClient;
+import com.urban.script.agent.feign.RecommendInternalClient;
 import com.urban.script.agent.feign.ShopInternalClient;
 import com.urban.script.common.R;
 import com.urban.script.common.annotation.RequireRole;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Agent 中间层 Controller
@@ -48,6 +50,7 @@ public class AgentController {
     private final PythonAgentClient pythonAgentClient;
     private final ShopInternalClient shopInternalClient;
     private final OrderInternalClient orderInternalClient;
+    private final RecommendInternalClient recommendInternalClient;
 
     // ========================================================================
     // 玩家端
@@ -60,7 +63,8 @@ public class AgentController {
      * <p>双重兜底：Controller 层 try-catch + FallbackFactory（有 Sentinel 时生效）
      */
     @Operation(summary = "AI 对话（玩家端）")
-    @RequireRole("ROLE_PLAYER")
+    // 非管理端角色（玩家 / DM 等）均可使用 AI 陪练；DM 已并入玩家端，无需单独开放
+    @RequireRole({"ROLE_PLAYER", "ROLE_DM"})
     @PostMapping("/chat")
     public R<ChatResponse> chat(@Valid @RequestBody ChatRequest request,
                                 @RequestHeader(value = "X-User-Id", required = false) Long userId,
@@ -76,6 +80,15 @@ public class AgentController {
         try {
             ChatResponse response = pythonAgentClient.chat(request);
             log.info("[AgentController] /agent/chat response code={}", response != null ? response.getCode() : "null");
+
+            // Python 侧业务失败是 HTTP 200 + body code=500（LLM 调不通、工具调用异常等）。
+            // 必须在这里转成 R.fail —— 否则 Feign 不抛异常，前端会把"AI 失败"当成成功处理。
+            if (response != null && response.getCode() != null && response.getCode() != 200) {
+                log.warn("[AgentController] python-agent 返回业务错误 code={}, message={}",
+                        response.getCode(), response.getMessage());
+                return R.fail(response.getCode(),
+                        response.getMessage() != null ? response.getMessage() : "AI 服务异常");
+            }
             return R.ok(response);
         } catch (Exception e) {
             // Sentinel 未启用时 FallbackFactory 不触发，Controller 层兜底
@@ -97,9 +110,12 @@ public class AgentController {
     @GetMapping("/internal/order/{orderNo}")
     public R<OrderInternalClient.OrderRes> getOrder(
             @PathVariable String orderNo,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @RequestHeader(value = "X-User-Role", required = false) String role,
             @RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
-        log.info("[AgentController] → order-service.getOrder orderNo={}", orderNo);
-        return orderInternalClient.getOrder(orderNo);
+        log.info("[AgentController] → order-service.getOrder orderNo={}, userId={}", orderNo, userId);
+        // 透传 X-User-Id/X-User-Role 给 order-service 做"只能查本人订单"的归属校验
+        return orderInternalClient.getOrder(orderNo, userId, role);
     }
 
     /**
@@ -129,6 +145,63 @@ public class AgentController {
         log.info("[AgentController] → shop-service.listScripts shopId={}, type={}, playerCnt={}",
                 shopId, type, playerCnt);
         return shopInternalClient.listScripts(shopId, type, playerCnt);
+    }
+
+    /**
+     * 查剧本详情（Python Agent 用）—— 剧情问答 / 角色介绍工具的数据源
+     * <p>OpenFeign 调用 shop-service 的 /script/internal/{id}
+     */
+    @Operation(summary = "内部：查剧本详情", hidden = true)
+    @GetMapping("/internal/script/{id}")
+    public R<ShopInternalClient.ScriptRes> getScript(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
+        log.info("[AgentController] → shop-service.getScript id={}", id);
+        return shopInternalClient.getScript(id);
+    }
+
+    /**
+     * 相似剧本（Python Agent 用）—— Neo4j 关系查询"和某本类似的"
+     * <p>OpenFeign 调用 recommend-service 的 /recommend/similar/{scriptId}
+     */
+    @Operation(summary = "内部：相似剧本（Neo4j 关系查询）", hidden = true)
+    @GetMapping("/internal/recommend/similar/{scriptId}")
+    public R<List<Map<String, Object>>> similarScripts(
+            @PathVariable Long scriptId,
+            @RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
+        log.info("[AgentController] → recommend-service.similar scriptId={}", scriptId);
+        return recommendInternalClient.similar(scriptId);
+    }
+
+    /**
+     * 智能选本（Python Agent 用）—— Cypher 过滤挑本
+     * <p>OpenFeign 调用 recommend-service 的 /recommend/internal/filter
+     */
+    @Operation(summary = "内部：智能选本（Cypher 过滤）", hidden = true)
+    @GetMapping("/internal/recommend/filter")
+    public R<List<Map<String, Object>>> smartFilter(
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String tag,
+            @RequestParam(required = false) Integer playerCnt,
+            @RequestParam(required = false) Integer limit,
+            @RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
+        log.info("[AgentController] → recommend-service.smartFilter type={}, tag={}, playerCnt={}",
+                type, tag, playerCnt);
+        return recommendInternalClient.smartFilter(type, tag, playerCnt, limit);
+    }
+
+    /**
+     * 取消订单（Python Agent 用）
+     * <p>OpenFeign 调用 order-service 的 /order/internal/cancel，X-User-Id 透传给下游做归属校验
+     */
+    @Operation(summary = "内部：按 orderNo 取消订单", hidden = true)
+    @PostMapping("/internal/order/{orderNo}/cancel")
+    public R<Void> cancelOrder(
+            @PathVariable String orderNo,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @RequestHeader(value = "X-Internal-Api-Key", required = false) String apiKey) {
+        log.info("[AgentController] → order-service.cancelOrder orderNo={}, userId={}", orderNo, userId);
+        return orderInternalClient.cancelOrder(orderNo, userId);
     }
 
     // ========================================================================

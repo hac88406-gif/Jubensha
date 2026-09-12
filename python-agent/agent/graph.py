@@ -71,9 +71,12 @@ def _call_llm(system_prompt: str, messages: list[dict[str, str]], **kwargs) -> s
                 },
                 json=payload,
             )
+            logger.info(f"[_call_llm] HTTP {resp.status_code}, body_len={len(resp.text)}, body_preview={resp.text[:200]}")
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"].strip()
+            content = data["choices"][0]["message"]["content"].strip()
+            logger.info(f"[_call_llm] content={content[:100]}")
+            return content
     except httpx.RequestError as e:
         logger.error(f"[_call_llm] 网络异常: {e}")
         raise RuntimeError(f"LLM 网络异常: {e}")
@@ -86,32 +89,63 @@ def _call_llm(system_prompt: str, messages: list[dict[str, str]], **kwargs) -> s
 # LangGraph 节点函数（每个接收 State dict，返回增量更新 dict）
 # ==========================================================================
 
+def _extract_json_object(text: str) -> dict | None:
+    """
+    从 LLM 输出中尽量提取 JSON 对象（意图分类用）
+
+    LLM 偶尔会输出散文 / markdown 代码块，这里做三重兜底：
+      ① 剥 ```json ``` 代码块后直接 json.loads
+      ② 取首个 { 到末个 } 之间的子串再 load
+      ③ 都失败返回 None（调用方回退 chat）
+    """
+    if not text:
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`").strip()
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:].strip()
+    try:
+        return json.loads(cleaned)
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # 兜底：截取首尾大括号之间的内容
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(cleaned[start:end + 1])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return None
+
+
 def recognize_intent(state: AgentState) -> dict:
     """
     节点 ① —— 意图分类 + 参数提取
 
     升级：让 LLM 同时输出 intent + order_no + script_type + player_cnt，
     一次调用拿到所有信息，避免分两次 LLM 调用。
+
+    注意：分类器只喂「最后一条用户消息」——完整历史（尤其当助手已答过同一问题时）
+    会让 LLM 倾向于接着聊天而不是输出 JSON 分类结果。
     """
-    messages = state.messages
-    llm_input = messages  # [{role, content}, ...]
+    # 只取待分类的那条用户输入（去掉多轮历史，保证分类稳定性）
+    llm_input = state.messages[-1:]
 
     intent = Intent.CHAT.value
     params: dict[str, Any] = {}
 
     try:
-        raw = _call_llm(prompts.INTENT_CLASSIFIER_SYSTEM, llm_input)
-        # 解析 JSON（剥掉 ```json ``` 代码块）
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.strip("`").strip()
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:].strip()
-        parsed = json.loads(cleaned)
+        # 分类是确定性任务，用低温度避免 LLM"自由发挥"输出散文而非 JSON
+        raw = _call_llm(prompts.INTENT_CLASSIFIER_SYSTEM, llm_input, temperature=0.1)
+        parsed = _extract_json_object(raw)
+
+        if not isinstance(parsed, dict):
+            raise ValueError("分类器未返回 JSON 对象")
 
         intent = parsed.get("intent", Intent.CHAT.value)
-        # 提取参数（null 就设成 None）
-        for key in ("order_no", "script_type"):
+        # 提取字符串参数（null 就设成 None）
+        for key in ("order_no", "script_type", "script_name", "tag"):
             val = parsed.get(key)
             if val and val != "null":
                 params[key] = val
@@ -177,6 +211,66 @@ def call_tool(state: AgentState) -> dict:
                 tool_raw = order_tool.list_my_orders(user_id)
                 result["raw"] = tool_raw
 
+        elif intent in (Intent.PLOT_QA.value, Intent.CHARACTER_INTRO.value):
+            # 剧情问答 / 角色介绍 —— 先按书名解析 ID，再拉详情（含 background/characters）
+            script_name = params.get("script_name")
+            if not script_name:
+                result["raw"] = {
+                    "error": "未识别出剧本名",
+                    "hint": "请把剧本名发给我，比如“介绍下《海上列车谋杀案》的角色”",
+                }
+            else:
+                script_id = script_tool.resolve_script_id(script_name)
+                if script_id is None:
+                    result["raw"] = {
+                        "error": f"未找到《{script_name}》",
+                        "hint": "试试说出剧本的完整名字？",
+                    }
+                else:
+                    logger.info(f"[call_tool] {intent}: scriptId={script_id}")
+                    tool_raw = script_tool.get_script_detail(script_id)
+                    result["raw"] = tool_raw
+
+        elif intent == Intent.SIMILAR_SCRIPT.value:
+            # Neo4j 关系查询 —— 和某本类似的剧本
+            script_name = params.get("script_name")
+            if not script_name:
+                result["raw"] = {
+                    "error": "未识别出剧本名",
+                    "hint": "请告诉我剧本名，比如“和《归途》类似的剧本还有哪些”",
+                }
+            else:
+                script_id = script_tool.resolve_script_id(script_name)
+                if script_id is None:
+                    result["raw"] = {"error": f"未找到《{script_name}》"}
+                else:
+                    logger.info(f"[call_tool] similar_script: scriptId={script_id}")
+                    tool_raw = script_tool.similar_scripts(script_id)
+                    result["raw"] = tool_raw
+
+        elif intent == Intent.SMART_PICK.value:
+            # 智能选本 —— Cypher 过滤（类型/人数/细标签组合）
+            logger.info(f"[call_tool] smart_pick: {params}")
+            tool_raw = script_tool.smart_pick(
+                params.get("script_type"),
+                params.get("player_cnt"),
+                params.get("tag"),
+            )
+            result["raw"] = tool_raw
+
+        elif intent == Intent.CANCEL_ORDER.value:
+            # 取消订单 —— 按 ORD 订单号取消（需登录，归属校验）
+            order_no = params.get("order_no")
+            if not order_no:
+                result["raw"] = {
+                    "error": "未找到订单号",
+                    "hint": "请把要取消的 ORD 订单号发给我，比如“取消 ORD20260903”",
+                }
+            else:
+                logger.info(f"[call_tool] cancel_order: orderNo={order_no}, userId={user_id}")
+                tool_raw = order_tool.cancel_order(order_no, user_id)
+                result["raw"] = tool_raw
+
         else:
             # route_by_intent 应该拦住了（chat/book_help 不走 call_tool），防御一下
             result["raw"] = {"note": "此意图不需要工具"}
@@ -227,7 +321,16 @@ def route_by_intent(state: AgentState) -> str:
     :return: "call_tool" 或 "generate_reply"
     """
     intent = state.intent
-    tool_intents = {Intent.QUERY_ORDER.value, Intent.SEARCH_SCRIPT.value, Intent.QUERY_MY_ORDERS.value}
+    tool_intents = {
+        Intent.QUERY_ORDER.value,
+        Intent.SEARCH_SCRIPT.value,
+        Intent.QUERY_MY_ORDERS.value,
+        Intent.PLOT_QA.value,
+        Intent.CHARACTER_INTRO.value,
+        Intent.SIMILAR_SCRIPT.value,
+        Intent.SMART_PICK.value,
+        Intent.CANCEL_ORDER.value,
+    }
     if intent in tool_intents:
         return "call_tool"
     # chat / book_help / 兜底

@@ -130,9 +130,38 @@ services:
       mysql:
         condition: service_healthy
 
+  # ==========================================================
+  # Neo4j 5（知识图谱 —— 剧本/人物/标签/推荐关系）
+  #   端口: 7474 HTTP 控制台 / 7687 Bolt
+  #   账号: neo4j / urban-neo4j
+  # ==========================================================
+  neo4j:
+    image: neo4j:5.24-community
+    container_name: urban-neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/urban-neo4j
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - TZ=Asia/Shanghai
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
 volumes:
   mysql_data:
   redis_data:
   nacos_data:
   nacos_logs:
   rabbitmq_data:
+  neo4j_data:
+  neo4j_logs:

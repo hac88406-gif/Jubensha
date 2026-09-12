@@ -81,8 +81,10 @@ CREATE TABLE IF NOT EXISTS order_info (
 -- ============================================================
 -- 初始化种子数据 (可选, 注释掉也行)
 -- 默认密码 123456 对应的 BCrypt: $2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy
+-- INSERT IGNORE：依赖 uk_username 唯一键，已存在的账号直接跳过，
+-- 保证整个脚本可重复执行（否则第二次跑会 ERROR 1062 中断，卡住后面所有建表语句）
 -- ============================================================
-INSERT INTO user_info (username, password, role, phone) VALUES
+INSERT IGNORE INTO user_info (username, password, role, phone) VALUES
 ('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 3, '13800000000'),
 ('dm001', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 1, '13800000001');
 
@@ -165,3 +167,27 @@ SET @sql = IF(@col_exists = 0,
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+-- ============================================================
+-- 支付流水表 payment_transaction
+-- 支付闭环：prepay 生成流水(status=0) → notify 回调验签后置为成功(status=1)
+-- payment_no 为业务幂等键（雪花生成），回调重复投递靠唯一键 + 状态机原子更新兜底
+-- ============================================================
+CREATE TABLE IF NOT EXISTS payment_transaction (
+    id           BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键',
+    payment_no   VARCHAR(64)   NOT NULL COMMENT '支付流水号（业务唯一，幂等键）',
+    order_no     VARCHAR(64)   NOT NULL COMMENT '关联订单号',
+    user_id      BIGINT        NOT NULL COMMENT '付款用户ID',
+    amount       DECIMAL(10,2) NOT NULL DEFAULT 0.00 COMMENT '支付金额',
+    pay_method   TINYINT       NOT NULL DEFAULT 1 COMMENT '支付方式：1-微信 2-支付宝 3-线下',
+    status       TINYINT       NOT NULL DEFAULT 0 COMMENT '状态：0-待支付 1-支付成功 2-支付失败',
+    channel      VARCHAR(32)   DEFAULT 'SIM' COMMENT '支付渠道（演示用 SIM=模拟渠道）',
+    pay_time     DATETIME      DEFAULT NULL COMMENT '支付成功时间',
+    notify_time  DATETIME      DEFAULT NULL COMMENT '回调到达时间',
+    create_time  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_payment_no (payment_no),
+    KEY idx_order_no (order_no),
+    KEY idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付流水表';

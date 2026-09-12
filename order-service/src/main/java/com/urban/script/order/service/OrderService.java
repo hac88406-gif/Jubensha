@@ -36,6 +36,27 @@ public interface OrderService {
     OrderRes getOrderDetail(Long orderId);
 
     /**
+     * 订单详情（带归属校验版）——游客/玩家仅能看自己的订单，店长可看任意订单
+     *
+     * @param orderId 订单主键 ID
+     * @param userId  当前登录用户 ID（X-User-Id）
+     * @param role    当前登录用户角色（X-User-Role）
+     */
+    OrderRes getOrderDetailForUser(Long orderId, Long userId, String role);
+
+    /**
+     * 取消订单（带归属校验版）——玩家仅能取消自己的订单，店长可取消任意订单
+     *
+     * @param orderId      订单主键 ID
+     * @param userId       当前登录用户 ID（X-User-Id）
+     * @param role         当前登录用户角色（X-User-Role）
+     * @param cancelReason 取消原因（USER_CANCEL）
+     * @param operator     操作人描述（用于日志审计）
+     */
+    void cancelOrderForUser(Long orderId, Long userId, String role,
+                            String cancelReason, String operator);
+
+    /**
      * 用户订单列表（按创建时间倒序，带场次时间信息）
      */
     List<OrderRes> listOrdersByUserId(Long userId);

@@ -62,22 +62,23 @@ public class SessionController {
 
     // ===================== 店长管理端 =====================
 
-    @Operation(summary = "创建场次（店长/管理员）")
-    @RequireRole({"ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @Operation(summary = "创建场次（店长）")
+    @RequireRole("ROLE_SHOP_OWNER")
     @PostMapping
     public R<Long> create(@Valid @RequestBody SessionCreateReq req,
                           @RequestHeader(value = "X-User-Id", required = false) Long userId,
                           @RequestHeader(value = "X-User-Role", required = false) String role) {
-        return R.ok("创建成功", sessionService.createSession(req));
+        // 传入操作人身份做店长归属校验（防越权操作他人店铺）
+        return R.ok("创建成功", sessionService.createSession(req, userId, role));
     }
 
-    @Operation(summary = "关闭场次（店长/管理员，开场前 2 小时外）")
-    @RequireRole({"ROLE_SHOP_OWNER", "ROLE_ADMIN"})
+    @Operation(summary = "关闭场次（店长，开场前 2 小时外）")
+    @RequireRole("ROLE_SHOP_OWNER")
     @PostMapping("/{id}/close")
     public R<Void> close(@PathVariable Long id,
                          @RequestHeader(value = "X-User-Id", required = false) Long operatorId,
                          @RequestHeader(value = "X-User-Role", required = false) String role) {
-        sessionService.closeSession(id, operatorId);
+        sessionService.closeSession(id, operatorId, role);
         return R.ok();
     }
 

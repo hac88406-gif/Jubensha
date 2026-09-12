@@ -34,6 +34,7 @@
         <module>shop-service</module>
         <module>order-service</module>
         <module>agent-gateway</module>
+        <module>recommend-service</module>
     </modules>
 
     <!-- 版本属性 -->

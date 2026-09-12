@@ -51,6 +51,14 @@ public interface ShopInternalClient {
             @RequestParam(required = false) Integer playerCnt);
 
     /**
+     * 内部剧本详情（shop-service: ScriptController /script/internal/{id}）
+     * <p>返回完整富化字段（background / tags / characters 等），供 AI 陪练的
+     * 剧情问答与角色介绍工具使用。
+     */
+    @GetMapping("/script/internal/{id}")
+    R<ScriptRes> getScript(@PathVariable("id") Long scriptId);
+
+    /**
      * 内部场次详情（shop-service: SessionController /session/internal/{id}）
      */
     @GetMapping("/session/internal/{id}")
@@ -60,7 +68,7 @@ public interface ShopInternalClient {
     // DTO（与 shop-service 的 ScriptRes / SessionFeignRes 字段对齐）
     // ========================================================================
 
-    /** 剧本 DTO（只取 agent 需要的字段） */
+    /** 剧本 DTO（列表只填基础字段；详情额外带 background/tags/characters 富化字段） */
     @Data
     class ScriptRes {
         private Long id;
@@ -70,6 +78,17 @@ public interface ShopInternalClient {
         private Integer playerMax;
         private Integer duration;
         private java.math.BigDecimal price;
+        // ---- 富化字段（详情接口返回） ----
+        private String image;
+        private String tags;
+        private java.math.BigDecimal mark;
+        private Integer markCnt;
+        private String background;
+        private Integer maleNum;
+        private Integer femaleNum;
+        private Integer unknownNum;
+        /** 角色列表 [{name,gender,age,desc,image}]，仅详情接口返回 */
+        private List<java.util.Map<String, Object>> characters;
     }
 
     /** 场次 DTO（与 shop-service 的 SessionFeignRes 字段对齐） */
@@ -102,6 +121,10 @@ public interface ShopInternalClient {
             return new ShopInternalClient() {
                 @Override
                 public R<List<ScriptRes>> listScripts(Long shopId, String type, Integer playerCnt) {
+                    return R.fail(503, "剧本服务暂不可用，请稍后再试");
+                }
+                @Override
+                public R<ScriptRes> getScript(Long scriptId) {
                     return R.fail(503, "剧本服务暂不可用，请稍后再试");
                 }
                 @Override

@@ -52,6 +52,37 @@ public class ScriptInfo implements Serializable {
     /** 可预约场次库存 */
     private Integer stock;
 
+    /** 封面图 URL */
+    private String image;
+
+    /** 剧情简介 */
+    private String background;
+
+    /** 细标签，逗号分隔（恐怖/古风/本格...） */
+    private String tags;
+
+    /** 评分（0~10） */
+    private BigDecimal mark;
+
+    /** 评分人数 */
+    private Integer markCnt;
+
+    /** 男性角色数 */
+    private Integer maleNum;
+
+    /** 女性角色数 */
+    private Integer femaleNum;
+
+    /** 未知性别角色数 */
+    private Integer unknownNum;
+
+    /**
+     * 角色列表（JSON 数组字符串，如
+     * [{"name":"仪伊","gender":2,"age":26,"desc":"...","image":"..."}]
+     * gender: 1=男 2=女；由 Service 层做 JSON 序列化/反序列化
+     */
+    private String characters;
+
     /** 上架状态: 0=下架 1=上架 */
     private Integer status;
 

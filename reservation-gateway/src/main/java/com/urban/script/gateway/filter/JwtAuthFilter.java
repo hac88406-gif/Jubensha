@@ -53,17 +53,24 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
     /**
      * 白名单（完全跳过 JWT 处理，连 Header 都不看）
      * <p>
-     * 包含：注册 / 登录 / agent 渠道 / 各微服务 Feign 内部接口前缀。
+     * 包含：注册 / 登录 / agent 健康检查 / agent & 各微服务 Feign 内部接口前缀。
+     * <p>
+     * 🔒 安全红线：绝不把整条 {@code /api/agent/} 放进白名单，否则玩家端 AI 对话
+     * 接口 /api/agent/chat 会被彻底放行（绕过 JWT + 下游 agent-gateway 又没有 RoleAspect），
+     * 任何人不用登录就能调 AI 对话。只放行 /agent/health 和 /agent/internal/**。
      * </p>
      */
     private static final List<String> WHITE_LIST = List.of(
             "/api/user/register",
             "/api/user/login",
-            "/api/agent/",                  // /api/agent/** 整条链路放行（渠道自己做鉴权）
-            "/api/session/internal/",       // shop-service SessionController 内部接口（/session/internal/**）
-            "/api/script/internal/",        // shop-service ScriptController 内部接口（/script/internal/**）
+            "/api/agent/health",            // agent-gateway 健康检查（无状态，公开）
+            "/api/agent/internal/",         // agent-gateway 内部 Feign 接口（有 X-Internal-Api-Key 兜底）
+            "/api/session/internal/",       // shop-service SessionController 内部接口
+            "/api/script/internal/",        // shop-service ScriptController 内部接口
             "/api/shop/internal/",          // shop-service 其他内部接口预留
-            "/api/order/internal/"          // order-service → Feign 内部接口
+            "/api/order/internal/",         // order-service → Feign 内部接口
+            "/api/order/pay/notify",        // 模拟支付平台回调（服务端对服务端，靠 HMAC 验签，与真实微信/支付宝一致）
+            "/api/recommend/internal/"      // recommend-service 内部同步接口（剧本/订单写 Neo4j）
     );
 
     @Override

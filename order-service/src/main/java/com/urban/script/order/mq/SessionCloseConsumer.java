@@ -104,7 +104,16 @@ public class SessionCloseConsumer {
                 }
 
                 // MySQL 回滚 booked（双重保险）
-                sessionMapper.decrementBookedIfEnough(sessionId, order.getPlayerCnt());
+                try {
+                    sessionMapper.decrementBookedIfEnough(sessionId, order.getPlayerCnt());
+                } catch (Exception dbEx) {
+                    // 订单已置为已取消(2)：重试时 UPDATE ... WHERE status=0 返回 0 行，
+                    // booked 不会再有回滚机会，捕获后记 error 日志提示人工核查（正常 MySQL 下不会发生）；
+                    // 同时继续处理剩余订单，不让单条失败阻塞批量取消。
+                    log.error("[SessionCloseConsumer] MySQL 回滚 booked 失败，需人工核查库存 "
+                                    + "orderNo={}, sessionId={}, playerCnt={}",
+                            order.getOrderNo(), sessionId, order.getPlayerCnt(), dbEx);
+                }
 
                 successCount++;
             }

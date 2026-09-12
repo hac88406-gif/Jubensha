@@ -23,14 +23,24 @@ public class RedissonConfig {
     @ConditionalOnMissingBean(RedissonClient.class)
     public RedissonClient redissonClient() {
         Config config = new Config();
-        // address 格式: redis://host:port 或 rediss://host:port (TLS)
+        // Redisson 延迟初始化：Spring Boot 启动时不主动连接 Redis，
+        // 等第一次请求进来才建连接。避免 Redis 挂了直接拉崩应用启动。
+        config.setLazyInitialization(true);
+
         config.useSingleServer()
                 .setAddress("redis://localhost:6379")
                 .setDatabase(1)
-                .setConnectionMinimumIdleSize(4)
+                // 启动时不要强制建立最小空闲连接，否则连接失败会阻断启动
+                .setConnectionMinimumIdleSize(0)
                 .setConnectionPoolSize(16)
-                .setConnectTimeout(5000)
-                .setTimeout(3000);
+                // 启动时就把 Redis 挂了 → 让 Redisson 快速失败（不 hang），
+                // 但因为 lazyInitialization=true，Bean 创建阶段根本不会触发连接，
+                // 真正触发连接是在第一次 tryLock / decrStock 时。
+                .setConnectTimeout(1000)
+                .setTimeout(3000)
+                // 启动时若 Redis 不可用，不要让 Redisson 抛异常阻断 Spring Boot 上下文初始化
+                .setRetryAttempts(1)
+                .setRetryInterval(100);
         return Redisson.create(config);
     }
 }

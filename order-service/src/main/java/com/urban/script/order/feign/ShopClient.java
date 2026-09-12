@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalTime;
 
@@ -66,6 +67,8 @@ public interface ShopClient {
         private Integer capacity;
         /** 已预约 */
         private Integer booked;
+        /** 剧本单价（订单服务计算支付金额用，与 shop-service SessionFeignRes 对齐） */
+        private BigDecimal price;
         /** 场次状态：0=已关闭 1=开放 */
         private Integer status;
 
