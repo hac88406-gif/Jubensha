@@ -191,3 +191,20 @@ CREATE TABLE IF NOT EXISTS payment_transaction (
     KEY idx_order_no (order_no),
     KEY idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='支付流水表';
+
+-- ============================================================
+-- MQ 消费去重表 mq_consume_log
+-- 作用：防止 RabbitMQ 因网络抖动/消费者重启导致同一条消息被重复消费
+-- 去重键：consumer_name + biz_key 联合唯一
+--   - 超时关单链路：consumer_name='OrderTimeoutConsumer', biz_key=orderNo
+--   - 场次关闭链路：consumer_name='SessionCloseConsumer', biz_key=sessionId
+-- 消费前先 INSERT，唯一键冲突说明已消费过 → 直接 ACK 跳过（幂等）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS mq_consume_log (
+    id            BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
+    consumer_name VARCHAR(64)  NOT NULL COMMENT '消费者名称',
+    biz_key       VARCHAR(128) NOT NULL COMMENT '业务去重键（orderNo / sessionId 等）',
+    create_time   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '消费时间',
+    PRIMARY KEY (id),
+    UNIQUE KEY uk_consumer_biz (consumer_name, biz_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='MQ消费去重日志表';

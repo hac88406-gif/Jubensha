@@ -21,14 +21,16 @@
 
   - Redis 不可用时（仅捕获连接/系统异常）自动降级为 MySQL 乐观锁，并异步 `forceRefreshBooked` 校准回 Redis，保证最终一致。
 
-**实测对比（2000 并发 / 10 名额）**：
+**实测对比（2000 并发 / 6 名额，50 独立用户循环复用 token）**：
 
-| 指标        | MySQL 乐观锁        | Redis+Lua                  |
-| --------- | ---------------- | -------------------------- |
-| 冲突率       | **86.5%**        | **0.000%**                 |
-| QPS       | **≈ 20**（97s 跑完） | **≈ 192**（峰值 669，2.99s 清空） |
-| 库存 booked | 10/10（靠字段约束兜底）   | 10/10，与成功数严格一致             |
-| 订单层       | 出现 22>10 越量      | 严格 = capacity，零超卖          |
+| 指标        | MySQL 乐观锁            | Redis+Lua             |
+| --------- | -------------------- | --------------------- |
+| 冲突率       | **88.55%**           | **0%**（剔除"已预约过"业务拦截后） |
+| QPS       | **≈ 20**（97.7s 跑完）   | **≈ 328**（6.09s 清空）   |
+| 库存 booked | 6/6（靠字段约束兜底，过程中超发16） | 6/6，与成功数严格一致，零超发      |
+| 订单层       | 出现 16>6 越量假象         | 严格 = capacity，零超卖     |
+
+> 冲突率口径说明：方案B 的"其他异常"主要来自 InnoDB 行锁等待/死锁/乐观锁 rows=0 重试，属于真实冲突；方案A 的"已预约过该场次"是 Redisson 锁的正常业务拦截，不计入冲突率。
 
 ### 亮点 2 · 订单最终一致性：RMQ TTL+DLX 延迟关单
 
@@ -37,7 +39,7 @@
 
 - 下单即发延迟消息到 `order.delay.queue`，通过 `x-dead-letter-exchange` + TTL 到期转入 `order.dlx.queue`；
 
-- 消费者**幂等**：先查 `status=0`（待支付）才取消，否则直接跳过；
+- 消费者**双重幂等**：① 消息级——`mq_consume_log` 去重表用唯一索引拦截 MQ 重复投递的同一条消息；② 业务级——`UPDATE ... WHERE status=0` 原子更新，返回 0 行说明已被其他路径处理（超时关单 vs 场次关闭并发）则跳过；
 
 - 取消时**双写回滚**：Redis 库存（Lua/forceRefresh）+ MySQL `booked` 字段；
 
@@ -57,6 +59,18 @@
 
 - **PythonAgentClient + FallbackFactory**：AI 服务不可用时返回兜底文案，不让 AI 故障拖垮主链路
   （Sentinel 目前在 Windows 环境下禁用 —— 其 `DateFileLogHandler` 存在 NPE，详见 `agent-gateway/application.yml` 注释；Feign 异常仍由 FallbackFactory 兜底，故熔断语义不变）。
+
+### 亮点 5 · 全链路可观测性：TraceId 分布式排障
+
+微服务拆成 6 个服务后，一次请求跨网关→order→shop→MQ 消费者，出问题时日志散在各处无法串联。
+
+- 网关 `TraceIdGlobalFilter` 作为 traceId 源头：读取客户端 `X-Trace-Id`，没有则生成，透传下游并回写响应头；
+
+- 下游各服务 `TraceIdFilter` 读取 Header 绑定到 MDC，日志 pattern 输出 `[%X{traceId}]`，finally 中清理防线程池串流；
+
+- 排障时按 traceId grep 各服务日志，即可还原"网关→Lua 扣减→DB 落库→MQ 关单"完整时间线；
+
+- MQ 消费者无入站 HTTP 上下文，消费时显式 `TraceIdUtil.set(generate())` 自建链路，保证异步消息也有 ID 可追。
 
 ***
 
@@ -93,18 +107,18 @@
 
 ## 📁 模块说明（Maven 多模块 + Python Agent）
 
-| 模块 / 目录               | 端口   | 职责        | 关键能力                                                                        |
-| --------------------- | ---- | --------- | --------------------------------------------------------------------------- |
-| `reservation-common`  | —    | 公共依赖      | 统一响应 `R`、全局异常、JWT 工具、`@RequireRole` 注解、InternalApiKeyInterceptor、雪花 ID      |
-| `reservation-gateway` | 8081 | 主网关       | JWT 鉴权过滤器、CORS 配置、路由分发到各业务服务                                                |
-| `user-service`        | 8082 | 用户服务      | 注册/登录/个人资料、BCrypt 密码、JWT 签发、角色切面                                            |
-| `shop-service`        | 8083 | 门店/剧本/场次  | 门店 CRUD、剧本 CRUD、场次创建（DM 时段冲突检测）、场次关闭（开场前 2h 限制）                             |
-| `order-service`       | 8084 | 订单/库存     | Redis+Lua 扣减、Redisson 分布式锁、TTL+DLX 延迟关单、关场批量取消、双写回滚降级                       |
-| `agent-gateway`       | 8085 | Agent 网关  | Feign 调 python-agent、FallbackFactory 降级兜底、Feign 调内部订单/门店接口                     |
-| `recommend-service`   | 8086 | 推荐服务      | Neo4j 剧本知识图谱（剧本/标签/作者/用户/玩过关系）、订单与剧本同步入图、相似与热门推荐（Redis 缓存）             |
+| 模块 / 目录               | 端口   | 职责        | 关键能力                                                                          |
+| --------------------- | ---- | --------- | ----------------------------------------------------------------------------- |
+| `reservation-common`  | —    | 公共依赖      | 统一响应 `R`、全局异常、JWT 工具、`@RequireRole` 注解、InternalApiKeyInterceptor、雪花 ID        |
+| `reservation-gateway` | 8081 | 主网关       | JWT 鉴权过滤器、CORS 配置、路由分发到各业务服务                                                  |
+| `user-service`        | 8082 | 用户服务      | 注册/登录/个人资料、BCrypt 密码、JWT 签发、角色切面                                              |
+| `shop-service`        | 8083 | 门店/剧本/场次  | 门店 CRUD、剧本 CRUD、场次创建（DM 时段冲突检测）、场次关闭（开场前 2h 限制）                               |
+| `order-service`       | 8084 | 订单/库存     | Redis+Lua 扣减、Redisson 分布式锁、TTL+DLX 延迟关单、关场批量取消、双写回滚降级                         |
+| `agent-gateway`       | 8085 | Agent 网关  | Feign 调 python-agent、FallbackFactory 降级兜底、Feign 调内部订单/门店接口                    |
+| `recommend-service`   | 8086 | 推荐服务      | Neo4j 剧本知识图谱（剧本/标签/作者/用户/玩过关系）、订单与剧本同步入图、相似与热门推荐（Redis 缓存）                    |
 | `python-agent/`       | 8000 | LLM Agent | FastAPI + LangGraph（意图识别 → 条件路由 → 工具调用/回复生成，三节点）、Redis 会话记忆、httpx 调 Java 内部接口 |
-| `init-scripts/`       | —    | 初始化 SQL   | 建库建表脚本（`01-init.sql`）                                                       |
-| `interview_shots/`    | —    | 面试素材      | Nacos 服务列表、MQ 控制台、核心代码、架构图等截图                                               |
+| `init-scripts/`       | —    | 初始化 SQL   | 建库建表脚本（`01-init.sql`）                                                         |
+| `interview_shots/`    | —    | 面试素材      | Nacos 服务列表、MQ 控制台、核心代码、架构图等截图                                                 |
 
 ***
 
@@ -241,13 +255,13 @@ python main.py
 **环境变量**：`python-agent/config.py` 加载的是**项目根目录**的 `.env`（不是 `python-agent/.env`）。
 在项目根目录执行 `cp .env.example .env` 后填写：
 
-| 变量 | 说明 |
-| --- | --- |
-| `INTERNAL_API_KEY` | **必填**。须与 Java 侧 `urban.internal-api-key`（Nacos `urban-shared-config`）完全一致，否则调用 agent-gateway 的 `/internal/**` 会返回 403，表现为 AI「检索失败」 |
-| `LLM_API_KEY` | **必填**。LLM 服务密钥 |
-| `JAVA_BASE_URL` | agent-gateway 地址，默认 `http://localhost:8085` |
-| `LLM_BASE_URL` / `LLM_MODEL` | 默认 `https://api.deepseek.com/v1` + `deepseek-chat`，可换成任意 OpenAI 兼容端点 |
-| `REDIS_URL` | 会话记忆存储，默认 `redis://localhost:6379/1` |
+| 变量                           | 说明                                                                                                                                  |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `INTERNAL_API_KEY`           | **必填**。须与 Java 侧 `urban.internal-api-key`（Nacos `urban-shared-config`）完全一致，否则调用 agent-gateway 的 `/internal/**` 会返回 403，表现为 AI「检索失败」 |
+| `LLM_API_KEY`                | **必填**。LLM 服务密钥                                                                                                                     |
+| `JAVA_BASE_URL`              | agent-gateway 地址，默认 `http://localhost:8085`                                                                                         |
+| `LLM_BASE_URL` / `LLM_MODEL` | 默认 `https://api.deepseek.com/v1` + `deepseek-chat`，可换成任意 OpenAI 兼容端点                                                                |
+| `REDIS_URL`                  | 会话记忆存储，默认 `redis://localhost:6379/1`                                                                                                |
 
 > Python 侧**不需要** `JWT_SECRET` —— 它既不签发也不校验 JWT，只携带内部 API Key 调 Java 接口。
 
@@ -267,7 +281,7 @@ node smoke_mainchain.js
 
 核心结论：
 
-- 单行热点下，把竞争从 MySQL 行锁挪到 Redis Lua，**冲突率 86.5% → 0**，**QPS 20 → 192**，且严格零超卖。
+- 单行热点下，把竞争从 MySQL 行锁挪到 Redis Lua，**冲突率 88.55% → 0**，**QPS 20 → 328**，且严格零超卖。
 
 - Redis 降级链路已验证：Redis 宕机时仅捕获连接/系统级异常回退 MySQL，业务异常不吞。
 

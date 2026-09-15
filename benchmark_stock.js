@@ -101,7 +101,9 @@ async function runBench(tokens) {
   while (auths.length < TOTAL_REQ) auths.push(tokens[auths.length % tokens.length]);
 
   const started = Date.now();
-  const c = { ok: 0, full: 0, auth: 0, other: 0, errs: [] };
+  // ok=成功抢到名额, full=名额已满, dup=已预约过(业务正常拒绝,非异常),
+  // auth=鉴权失败, other=真正的系统异常(用于计算冲突率)
+  const c = { ok: 0, full: 0, dup: 0, auth: 0, other: 0, errs: [] };
 
   await Promise.all(auths.map((token) => {
     return requestJson(GW, '/api/order', 'POST',
@@ -112,6 +114,7 @@ async function runBench(tokens) {
         const msg = (r.data?.message || '').toString();
         if (code === 200) c.ok++;
         else if (msg.includes('已满') || msg.includes('名额')) c.full++;
+        else if (msg.includes('已预约') || msg.includes('重复')) c.dup++;
         else if (code === 401) c.auth++;
         else {
           c.other++;
@@ -176,7 +179,8 @@ async function runBench(tokens) {
   console.log(``);
   console.log(`  ✅ 成功_抢到名额  : ${c.ok}     (预期 ≈ ${before.capacity})`);
   console.log(`  ❌ 失败_名额已满  : ${c.full}     (预期 ≈ ${TOTAL_REQ - before.capacity})`);
-  console.log(`  🚫 鉴权失败       : ${c.auth}`);
+  console.log(`  🚫 失败_已预约过  : ${c.dup}     (Redisson锁正常拦截,非异常)`);
+  console.log(`  🔐 鉴权失败       : ${c.auth}`);
   console.log(`  ⚠️  其他异常       : ${c.other}`);
   if (c.errs.length) console.log(`     样例错误: ${JSON.stringify(c.errs)}`);
   console.log(``);
@@ -192,7 +196,8 @@ async function runBench(tokens) {
   console.log(`${'─'.repeat(70)}`);
   if (MODE === 'A') {
     console.log(`  定义   : Redis+Lua 方案下，所有请求经 Lua 脚本原子执行。`);
-    console.log(`           不存在乐观锁冲突（先读后写竞态），冲突率 = 其他异常 / 总请求`);
+    console.log(`           不存在乐观锁冲突（先读后写竞态），冲突率 = 真正系统异常 / 总请求`);
+    console.log(`           （"已预约过"是 Redisson 锁的正常业务拦截，不计入冲突率）`);
     console.log(`  实际值 : ${conflictPct} %`);
     console.log(`  预期   : ≈ 0%  (一般 < 1%)`);
     console.log(`  结论   : ${Number(conflictPct) < 1 ? '✅ 符合预期 —— Lua 原子性保证了零冲突扣减' : '❌ 异常过多'}`);
@@ -212,6 +217,7 @@ async function runBench(tokens) {
     总请求数: TOTAL_REQ,
     成功数: c.ok,
     名额已满数: c.full,
+    已预约过数: c.dup,
     其他异常数: c.other,
     冲突率_percent: Number(conflictPct),
     最终Booked: after.booked,

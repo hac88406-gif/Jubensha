@@ -3,10 +3,12 @@ package com.urban.script.order.mq;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
+import com.urban.script.common.TraceIdUtil;
 import com.urban.script.order.config.RabbitMQConfig;
 import com.urban.script.order.entity.OrderInfo;
 import com.urban.script.order.mapper.OrderMapper;
 import com.urban.script.order.mapper.SessionMapper;
+import com.urban.script.order.service.MqDedupService;
 import com.urban.script.order.service.StockService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +54,7 @@ public class SessionCloseConsumer {
     private final SessionMapper sessionMapper;
     private final StockService stockService;
     private final ObjectMapper objectMapper;
+    private final MqDedupService mqDedupService;
 
     /**
      * 监听 session.close.queue —— 场次关闭批量取消订单
@@ -62,6 +65,8 @@ public class SessionCloseConsumer {
         String body = new String(message.getBody());
 
         try {
+            // MQ 消费无入站 HTTP 上下文，自建 traceId 保证异步消息也有链路 ID 可追
+            TraceIdUtil.set(TraceIdUtil.generate());
             log.info("[SessionCloseConsumer] 收到场次关闭消息 body={}", body);
 
             // ① 解析 JSON
@@ -75,7 +80,14 @@ public class SessionCloseConsumer {
                 return;
             }
 
-            // ② 查该场次所有待支付订单
+            // ② 消息级幂等：去重表拦截 MQ 重复投递的同一条场次关闭消息
+            if (!mqDedupService.tryConsume("SessionCloseConsumer", String.valueOf(sessionId))) {
+                log.info("[SessionCloseConsumer] 场次关闭消息重复投递，幂等跳过 sessionId={}", sessionId);
+                channel.basicAck(deliveryTag, false);
+                return;
+            }
+
+            // ③ 查该场次所有待支付订单
             List<OrderInfo> pendingOrders = orderMapper.selectPendingBySession(sessionId);
             if (pendingOrders == null || pendingOrders.isEmpty()) {
                 log.info("[SessionCloseConsumer] sessionId={} 无待支付订单，幂等 ACK", sessionId);
@@ -83,7 +95,7 @@ public class SessionCloseConsumer {
                 return;
             }
 
-            // ③ 逐个取消（每个订单独立幂等）
+            // ④ 逐个取消（每个订单独立业务级幂等：updateStatus WHERE status=0）
             int successCount = 0;
             int skipCount = 0;
 
@@ -121,7 +133,7 @@ public class SessionCloseConsumer {
             log.info("[SessionCloseConsumer] ✅ 场次关闭处理完成 sessionId={}, 成功={}, 跳过={}, 总数={}",
                     sessionId, successCount, skipCount, pendingOrders.size());
 
-            // ④ 手动 ACK
+            // ⑤ 手动 ACK
             channel.basicAck(deliveryTag, false);
 
         } catch (Exception e) {
@@ -131,6 +143,9 @@ public class SessionCloseConsumer {
             } catch (IOException ioEx) {
                 log.error("[SessionCloseConsumer] basicNack 也失败了", ioEx);
             }
+        } finally {
+            // 消费线程可能被复用，必须清理 traceId 防串流
+            TraceIdUtil.clear();
         }
     }
 }

@@ -3,10 +3,12 @@ package com.urban.script.order.mq;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rabbitmq.client.Channel;
+import com.urban.script.common.TraceIdUtil;
 import com.urban.script.order.config.RabbitMQConfig;
 import com.urban.script.order.entity.OrderInfo;
 import com.urban.script.order.mapper.OrderMapper;
 import com.urban.script.order.mapper.SessionMapper;
+import com.urban.script.order.service.MqDedupService;
 import com.urban.script.order.service.StockService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +54,7 @@ public class OrderTimeoutConsumer {
     private final SessionMapper sessionMapper;
     private final StockService stockService;
     private final ObjectMapper objectMapper;
+    private final MqDedupService mqDedupService;
 
     /**
      * 监听 order.dlx.queue —— 超时关单
@@ -62,6 +65,8 @@ public class OrderTimeoutConsumer {
         String body = new String(message.getBody());
 
         try {
+            // MQ 消费无入站 HTTP 上下文，自建 traceId 保证异步消息也有链路 ID 可追
+            TraceIdUtil.set(TraceIdUtil.generate());
             log.info("[OrderTimeoutConsumer] 收到超时关单消息 body={}", body);
 
             // ① 解析 JSON
@@ -75,7 +80,15 @@ public class OrderTimeoutConsumer {
                 return;
             }
 
-            // ② 查订单（拿到 playerCnt 用于回滚库存）
+            // ② 消息级幂等：去重表拦截 MQ 重复投递的同一条消息
+            //    与下方 updateStatus WHERE status=0 业务级幂等形成"双重保险"
+            if (!mqDedupService.tryConsume("OrderTimeoutConsumer", orderNo)) {
+                log.info("[OrderTimeoutConsumer] 消息重复投递，幂等跳过 orderNo={}", orderNo);
+                channel.basicAck(deliveryTag, false);
+                return;
+            }
+
+            // ③ 查订单（拿到 playerCnt 用于回滚库存）
             OrderInfo order = orderMapper.selectByOrderNo(orderNo);
             if (order == null) {
                 log.warn("[OrderTimeoutConsumer] 订单不存在 orderNo={}，可能已被清理，ACK 跳过", orderNo);
@@ -83,7 +96,7 @@ public class OrderTimeoutConsumer {
                 return;
             }
 
-            // ③ 幂等保护：原子更新 status → 2（只有 status=0 才能被改掉）
+            // ④ 业务级幂等：原子更新 status → 2（只有 status=0 才能被改掉）
             int rows = orderMapper.updateStatusAndCancelReason(orderNo, 2, "TIMEOUT");
             if (rows == 0) {
                 // 0 行 = 已经被其他路径处理过（手动取消 / 场次关闭）
@@ -93,7 +106,7 @@ public class OrderTimeoutConsumer {
                 return;
             }
 
-            // ④ 释放 Redis + MySQL booked
+            // ⑤ 释放 Redis + MySQL booked
             try {
                 stockService.rollbackStock(sessionId, order.getPlayerCnt());
             } catch (Exception redisEx) {
@@ -116,7 +129,7 @@ public class OrderTimeoutConsumer {
             log.info("[OrderTimeoutConsumer] ✅ 超时关单成功 orderNo={}, sessionId={}, playerCnt={}",
                     orderNo, sessionId, order.getPlayerCnt());
 
-            // ⑤ 手动 ACK
+            // ⑥ 手动 ACK
             channel.basicAck(deliveryTag, false);
 
         } catch (Exception e) {
@@ -128,6 +141,9 @@ public class OrderTimeoutConsumer {
             } catch (IOException ioEx) {
                 log.error("[OrderTimeoutConsumer] basicNack 也失败了", ioEx);
             }
+        } finally {
+            // 消费线程可能被复用，必须清理 traceId 防串流
+            TraceIdUtil.clear();
         }
     }
 }
