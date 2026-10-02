@@ -206,7 +206,7 @@ async function runBench(tokens) {
     console.log(`           冲突率 = 乐观锁行竞争导致 rows=0 (需重试) 的比例。`);
     console.log(`           这里 \"其他异常\" 主要由 MySQL InnoDB 行锁等待 / 死锁 / 乐观锁 rows=0 业务重试造成`);
     console.log(`  实际值 : ${conflictPct} %`);
-    console.log(`  预期   : ≈ 40% ~ 70%  (高并发下行锁冲突严重)`);
+    console.log(`  预期   : ≈ 40%~95%  (高并发下单行热点冲突严重；实测 2026-09-16 为 88.55%)`);
     console.log(`  结论   : ${Number(conflictPct) > 30 ? '✅ 符合预期 —— MySQL 乐观锁高冲突率印证了 Redis+Lua 的必要性' : '⚠️  冲突率偏低，可能未走 MySQL 路径'}`);
   }
   console.log(`${'='.repeat(70)}\n`);

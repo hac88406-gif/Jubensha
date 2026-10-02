@@ -46,7 +46,7 @@ function sessionTimes(now) {
 
 (async () => {
   const ts = Date.now().toString().slice(-4);
-  const owner = 'shop_owner_jmeter'; const player = `play${ts}`;
+  const owner = 'shop1'; const player = `play${ts}`;
 
   // 1. 店主登录(复用已有店主账号) + 玩家注册登录
   let r = await req('/api/user/login', 'POST', { username: owner, password: '123456' });
