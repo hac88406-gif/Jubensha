@@ -80,12 +80,17 @@ public interface OrderMapper extends BaseMapper<OrderInfo> {
      * <p>支付回调专用：UPDATE ... WHERE status = 0 保证并发回调 / 重复回调
      * 只有一个能成功，另一个返回 0 行幂等跳过。
      *
-     * @param orderNo 订单号
+     * <p>同时写入 pay_method（取自支付流水的支付方式）：
+     * 订单列表的"支付方式"列直接读 order_info.pay_method，若不在这里回写，
+     * 支付成功后该列会一直显示"未指定"。
+     *
+     * @param orderNo   订单号
+     * @param payMethod 支付方式（1-微信 2-支付宝 3-线下，来源 payment_transaction.pay_method）
      * @return 更新行数：1=本次回调生效；0=已被其他路径处理（已支付/已取消）
      */
-    @Update("UPDATE order_info SET status = 1, pay_time = NOW(), update_time = NOW() " +
+    @Update("UPDATE order_info SET status = 1, pay_time = NOW(), pay_method = #{payMethod}, update_time = NOW() " +
             "WHERE order_no = #{orderNo} AND status = 0")
-    int updateStatusToPaid(@Param("orderNo") String orderNo);
+    int updateStatusToPaid(@Param("orderNo") String orderNo, @Param("payMethod") Integer payMethod);
 
     /**
      * 原子取消订单 —— 带幂等 + 防误伤保护（只有 status=0 待支付才能被取消）

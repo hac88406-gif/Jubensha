@@ -209,8 +209,8 @@ public class PaymentServiceImpl implements PaymentService {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "订单已取消，本次支付作废");
         }
 
-        // ⑤ 原子流转：订单 0→1（带幂等），成功后再给流水打成功标记
-        int orderRows = orderMapper.updateStatusToPaid(req.getOrderNo());
+        // ⑤ 原子流转：订单 0→1（带幂等），同时回写支付方式，成功后再给流水打成功标记
+        int orderRows = orderMapper.updateStatusToPaid(req.getOrderNo(), pay.getPayMethod());
         if (orderRows == 0) {
             // 竞态：另一路径已处理（已支付）→ 幂等返回
             log.info("[notify] 订单状态已变更，本次回调不重复入账 orderNo={}", req.getOrderNo());
