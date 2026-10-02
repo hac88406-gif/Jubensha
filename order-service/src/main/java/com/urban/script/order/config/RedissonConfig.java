@@ -30,12 +30,13 @@ public class RedissonConfig {
         config.useSingleServer()
                 .setAddress("redis://localhost:6379")
                 .setDatabase(1)
-                // 启动时不要强制建立最小空闲连接，否则连接失败会阻断启动
-                .setConnectionMinimumIdleSize(0)
+                // 最小空闲连接不能为 0：为 0 时连接池不会常驻"普通命令连接"，
+                // 命令只能现建连接，而 doConnect 在建立阶段就会超时（TimeoutException），
+                // 表现为 Redisson 锁/限流全部降级（findOrCreatePayment / tryLock 拿不到连接）。
+                // 这里与 application.yml 的 connection-minimum-idle-size: 4 对齐。
+                .setConnectionMinimumIdleSize(4)
                 .setConnectionPoolSize(16)
-                // 启动时就把 Redis 挂了 → 让 Redisson 快速失败（不 hang），
-                // 但因为 lazyInitialization=true，Bean 创建阶段根本不会触发连接，
-                // 真正触发连接是在第一次 tryLock / decrStock 时。
+                // 兜底快速失败：即便 Redis 挂了，也不让业务线程长时间挂起
                 .setConnectTimeout(1000)
                 .setTimeout(3000)
                 // 启动时若 Redis 不可用，不要让 Redisson 抛异常阻断 Spring Boot 上下文初始化
