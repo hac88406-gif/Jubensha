@@ -18,7 +18,6 @@ const registerForm = reactive({
   username: '',
   password: '',
   nickname: '',
-  role: 'ROLE_PLAYER', // 默认玩家，可注册店长
 })
 
 const loginRules = {
@@ -142,12 +141,8 @@ async function doRegister() {
             <el-form-item label="昵称" prop="nickname">
               <el-input v-model="registerForm.nickname" placeholder="展示昵称" />
             </el-form-item>
-            <el-form-item label="角色">
-              <el-radio-group v-model="registerForm.role">
-                <el-radio-button value="ROLE_PLAYER">玩家</el-radio-button>
-                <el-radio-button value="ROLE_SHOP_OWNER">店长</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
+            <!-- 注册账号统一为玩家角色（后端 RegisterReq 不接收角色，店长账号由平台分配），
+                 原先的"店长"注册选项与后端行为不符，已移除避免误导 -->
             <el-button type="primary" size="large" class="submit" :loading="loading" @click="doRegister">
               注 册
             </el-button>
