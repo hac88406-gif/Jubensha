@@ -36,18 +36,25 @@ public class TraceIdGlobalFilter implements GlobalFilter, Ordered {
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
-        // ① 读客户端自定义 traceId 或生成
-        String traceId = exchange.getRequest().getHeaders().getFirst(TraceIdUtil.TRACE_ID_HEADER);
-        if (traceId == null || traceId.isBlank()) {
-            traceId = TraceIdUtil.generate();
-        }
+        // ① 读客户端自定义 traceId 或生成（final：供 beforeCommit 的 lambda 引用）
+        String headerTraceId = exchange.getRequest().getHeaders().getFirst(TraceIdUtil.TRACE_ID_HEADER);
+        final String traceId = (headerTraceId == null || headerTraceId.isBlank())
+                ? TraceIdUtil.generate()
+                : headerTraceId;
 
         // ② 透传下游 + 回写响应头（不管下游是否处理，都让调用方拿到）
         ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                 .header(TraceIdUtil.TRACE_ID_HEADER, traceId)
                 .build();
         ServerHttpResponse response = exchange.getResponse();
-        response.getHeaders().set(TraceIdUtil.TRACE_ID_HEADER, traceId);
+        // 回写响应头必须放在 beforeCommit（响应提交前一刻）：
+        // 下游 Servlet 服务的 TraceIdFilter 也会写一次 X-Trace-Id，网关转发时会把它合并
+        // 进最终响应头；若提前 set，合并后会出现 "X-Trace-Id: a, a" 的重复值。
+        // beforeCommit 在下游响应头合并完成之后执行，此处 set 可直接覆盖为单值。
+        response.beforeCommit(() -> {
+            response.getHeaders().set(TraceIdUtil.TRACE_ID_HEADER, traceId);
+            return Mono.empty();
+        });
 
         // ③ 网关自身日志绑定 MDC（当前线程段的 filter 日志可带上 traceId）
         TraceIdUtil.set(traceId);
