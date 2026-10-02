@@ -79,7 +79,7 @@ _svc_*.err.log
 _svc_*.log.err
 
 # ---------- 压测/benchmark 临时输出 ----------
-interview_bench_*.txt
+bench_*.txt
 
 # ---------- 本地交付临时草稿（内容已迁移至 docs/） ----------
 _deliverables_*.md
@@ -109,15 +109,3 @@ _verify*.js
 _full_test.js
 _test_report.txt
 
-# ---------- 面试资料（个人资料，不上传） ----------
-# 注：interview_shots/ 已决定保留在仓库中（README 配图素材），故不在此忽略
-build_interview_docx.py
-*面试问答*.html
-*背诵版*.docx
-
-# ---------- 面试准备材料（个人后台资料，禁止随仓库公开） ----------
-# INTERVIEW_PITCH.md = 面试讲稿 + 追问防守话术 + "绝对不要说的话"（等于底牌清单）
-# INTERVIEW_ASSETS.md = "面试时怎么说"的截图提示
-# 这两份被面试官翻到会很尴尬（暴露准备痕迹），且 PITCH 里明写了项目弱点，故仅本地保留
-docs/INTERVIEW_PITCH.md
-docs/INTERVIEW_ASSETS.md

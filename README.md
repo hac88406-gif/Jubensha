@@ -101,7 +101,7 @@
   公共中间件：Nacos 2.4 · MySQL 8.0 · Redis 7 · RabbitMQ 3.13 · Neo4j · Redisson
 ```
 
-> 架构图源文件：[interview\_shots/architecture\_renderer.html](interview_shots/architecture_renderer.html)
+> 架构图源文件：[assets/shots/architecture\_renderer.html](assets/shots/architecture_renderer.html)
 
 ***
 
@@ -118,7 +118,7 @@
 | `recommend-service`   | 8086 | 推荐服务      | Neo4j 剧本知识图谱（剧本/标签/作者/用户/玩过关系）、订单与剧本同步入图、相似与热门推荐（Redis 缓存）                    |
 | `python-agent/`       | 8000 | LLM Agent | FastAPI + LangGraph（意图识别 → 条件路由 → 工具调用/回复生成，三节点）、Redis 会话记忆、httpx 调 Java 内部接口 |
 | `init-scripts/`       | —    | 初始化 SQL   | 建库建表脚本（`01-init.sql`）                                                         |
-| `interview_shots/`    | —    | 面试素材      | Nacos 服务列表、MQ 控制台、核心代码、架构图等截图                                                 |
+| `assets/shots/`       | —    | 项目配图      | 架构图源文件、Nacos 服务列表、MQ 控制台、核心代码等截图                                                 |
 
 ***
 
@@ -285,15 +285,11 @@ node smoke_mainchain.js
 
 - Redis 降级链路已验证：Redis 宕机时仅捕获连接/系统级异常回退 MySQL，业务异常不吞。
 
-完整叙述见 [docs/PROJECT\_NARRATIVE.md](docs/PROJECT_NARRATIVE.md)。
-
 ***
 
 ## 📚 更多文档
 
-| 文档         | 路径                                                      | 用途                               |
-| ---------- | ------------------------------------------------------- | -------------------------------- |
-| 项目叙事（面试讲稿） | [docs/PROJECT\_NARRATIVE.md](docs/PROJECT_NARRATIVE.md) | 问题→方案→结果结构，面试自我介绍用               |
-| 简历亮点摘要     | [docs/RESUME\_HIGHLIGHTS.md](docs/RESUME_HIGHLIGHTS.md) | 每条亮点都有量化结果                       |
-| 脚本说明       | [scripts/README.md](scripts/README.md)                  | 根目录 benchmark / smoke 脚本的用途和运行方式 |
+| 文档   | 路径                              | 用途                               |
+| ---- | ------------------------------- | -------------------------------- |
+| 脚本说明 | [scripts/README.md](scripts/README.md) | 根目录 benchmark / smoke 脚本的用途和运行方式 |
 
