@@ -58,6 +58,41 @@ CREATE TABLE IF NOT EXISTS script_info (
     KEY idx_shop (shop_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='剧本信息表';
 
+-- ============================================================
+-- 剧本表补"富化字段"（爬虫入库 + 数据清洗阶段新增，上面的 CREATE TABLE 未包含）
+-- ---------------------------------------------------------------------------
+-- Bug 修复：ScriptInfo 实体已声明 image / background / tags / mark / mark_cnt /
+-- male_num / female_num / unknown_num / characters 共 9 个字段，但初始建表缺少这些列，
+-- MyBatis-Plus 查询时会把未知列拼进 SQL → 直接报
+-- "Unknown column 'characters' in 'field list'"，剧本列表 / AI 查本 / 剧本详情
+-- 三条链路全部阻断（P0）。
+--
+-- 做成"整组判断、整组补齐"：
+--   9 列全缺（全新库）      → 一次性补齐
+--   9 列齐全（已修复过的库）→ 跳过，脚本可重复执行
+-- ⚠️ 若库中处于"部分存在"的中间态，请先手工核对再执行（否则 ALTER 报 Duplicate column）。
+-- ============================================================
+SET @missing = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = 'urban_script_reservation'
+                  AND TABLE_NAME = 'script_info'
+                  AND COLUMN_NAME IN ('image','background','tags','mark','mark_cnt',
+                                      'male_num','female_num','unknown_num','characters'));
+SET @sql = IF(@missing < 9,
+    'ALTER TABLE script_info
+        ADD COLUMN image       VARCHAR(500) DEFAULT NULL COMMENT ''封面图URL'' AFTER stock,
+        ADD COLUMN background  TEXT         DEFAULT NULL COMMENT ''剧情简介'' AFTER image,
+        ADD COLUMN tags        VARCHAR(500) DEFAULT NULL COMMENT ''细标签逗号分隔'' AFTER background,
+        ADD COLUMN mark        DECIMAL(3,1) DEFAULT 0.0  COMMENT ''评分'' AFTER tags,
+        ADD COLUMN mark_cnt    INT          DEFAULT 0    COMMENT ''评分人数'' AFTER mark,
+        ADD COLUMN male_num    INT          DEFAULT 0    COMMENT ''男性角色数'' AFTER mark_cnt,
+        ADD COLUMN female_num  INT          DEFAULT 0    COMMENT ''女性角色数'' AFTER male_num,
+        ADD COLUMN unknown_num INT          DEFAULT 0    COMMENT ''未知性别角色数'' AFTER female_num,
+        ADD COLUMN characters  TEXT         DEFAULT NULL COMMENT ''角色列表 JSON [{name,gender,age,desc,image}]'' AFTER unknown_num',
+    'SELECT 1');
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- 订单表
 CREATE TABLE IF NOT EXISTS order_info (
     id          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '订单ID',
