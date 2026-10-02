@@ -32,10 +32,17 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
-        <!-- ========== Spring Cloud Nacos（Discovery 注册，供 agent-gateway Feign 按服务名调用） ========== -->
+        <!-- ========== Spring Cloud Nacos（Discovery 注册 + Config 配置中心） ========== -->
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
+        </dependency>
+        <!-- Config 依赖：application.yml 中 optional:nacos:urban-shared-config 需要它才能加载；
+             缺失时 import 会被静默跳过（optional 前缀），导致 urban.internal-api-key / jwt.secret
+             回退为本地默认值，与其他服务不一致 → 支付后图谱同步等内部调用 403 -->
+        <dependency>
+            <groupId>com.alibaba.cloud</groupId>
+            <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
         </dependency>
 
         <!-- Neo4j 知识图谱 -->
