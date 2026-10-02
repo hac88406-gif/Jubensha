@@ -44,7 +44,7 @@ import java.util.concurrent.TimeUnit;
  *      ⑤ 订单已取消 → 拒绝本次支付（模拟层面提示退款必要性）
  * </pre>
  *
- * <p>设计要点（面试可讲）：
+ * <p>设计要点：
  * <ul>
  *   <li><b>回调验签</b>：HMAC-SHA256 共享密钥，防止伪造回调</li>
  *   <li><b>双幂等</b>：流水支付号唯一键 + 订单/流水「WHERE status=0 原子流转」，

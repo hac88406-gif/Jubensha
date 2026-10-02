@@ -21,7 +21,7 @@ import org.springframework.stereotype.Service;
  * <ul>
  *   <li>DB 唯一索引是持久化的，消费者重启 / Redis 宕机后去重记录不丢失</li>
  *   <li>消费本身就是写 DB（改订单状态），多一次 INSERT 开销可接受</li>
- *   <li>面试可讲"消息幂等的三种实现：唯一键去重表 / Redis SETNX / 状态机判断"</li>
+ *   <li>消息幂等的三种实现思路：唯一键去重表 / Redis SETNX / 状态机判断，本项目选前者</li>
  * </ul>
  *
  * <p><b>与状态机幂等的关系：</b>
