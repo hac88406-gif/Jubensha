@@ -26,6 +26,11 @@ from loguru import logger
 import config
 from agent.graph import run_graph, get_graph
 from schema.chat import ChatRequest, ChatResponse
+from trace_id import TraceIdMiddleware, setup_trace_logging
+
+# 日志格式接入 traceId（对齐 Java logback 的 [%X{traceId:-}]）。
+# 注意：必须在 App / 请求处理之前调用，否则 logger.remove() 会让启动阶段日志格式不一致。
+setup_trace_logging()
 
 # ==========================================================================
 # Nacos 注册说明（不自动注册，手动注册为持久实例 ephemeral=false）：
@@ -61,6 +66,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 跨语言链路追踪：读取 Java agent-gateway 透传的 X-Trace-Id（缺失则本地生成），
+# 存入 ContextVar 供日志与出站调用使用，并回写响应头。后注册者在外层 → 先于 CORS 执行。
+app.add_middleware(TraceIdMiddleware)
 
 
 # ==========================================================================
