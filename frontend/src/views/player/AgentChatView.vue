@@ -4,7 +4,7 @@ import { useUserStore } from '../../stores/user'
 import { fetchAgentChat, resetAgentMemory } from '../../api/agent'
 
 /**
- * AI 陪练对话页（S5）
+ * AI 陪练对话页
  *
  * 链路：本页 → /api/agent/chat → agent-gateway → Python Agent（LangGraph + 工具调用）
  * 特性：

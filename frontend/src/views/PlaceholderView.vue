@@ -1,7 +1,7 @@
 <script setup>
 import { useRoute } from 'vue-router'
 
-// S1 通用占位页：S2~S5 各业务页面前，先保证路由可跳转、导航可点击
+// 通用占位页：各业务页面实现前，先保证路由可跳转、导航可点击
 const route = useRoute()
 </script>
 
