@@ -119,8 +119,8 @@ class RecommendServiceTest {
     @Test
     @DisplayName("无缓存时走图谱召回，按加权分数排序并写回缓存")
     void recommend_noCache_recallsAndSortThenWritesCache() {
-        // 三级 all() 调用顺序：content(#1) / cf(#2) / hot 兜底(#3)
-        // 12 条内容召回 ≥ limit=10，不触发热门兜底，验证走 query 两次即可
+        // all() 调用顺序：content(#1) / charContent 人物联动(#2) / cf 协同过滤(#3)
+        // 12 条内容召回 ≥ limit=10，不触发热门兜底 → all() 只需 3 个返回值
         List<Map<String, Object>> content = new ArrayList<>();
         for (int i = 1; i <= 12; i++) {
             content.add(record(i, "剧本" + i, "硬核", 12 - i));
@@ -131,7 +131,7 @@ class RecommendServiceTest {
         List<Map<String, Object>> result = service.recommend(USER_ID, 10);
 
         assertThat(result).hasSize(10);
-        // 内容召回按 score 降序：score = count * 0.6
+        // 内容召回按 score 降序：score = count * 0.5（内容召回权重）
         assertThat(result.get(0).get("scriptId")).isEqualTo(1L);
         // 合并结果写缓存
         verify(valueOps).set(eq("rec:" + USER_ID), anyString(), eq(Duration.ofMinutes(30)));
@@ -148,9 +148,10 @@ class RecommendServiceTest {
         }
         when(valueOps.get("rec:" + USER_ID)).thenReturn(null);
         when(fetchable.all())
-                .thenReturn(content)          // #1 content
-                .thenReturn(Collections.emptyList()) // #2 cf
-                .thenReturn(hot);             // #3 hot 兜底
+                .thenReturn(content)                 // #1 content 内容召回
+                .thenReturn(Collections.emptyList()) // #2 charContent 人物联动（空）
+                .thenReturn(Collections.emptyList()) // #3 cf 协同过滤（空）
+                .thenReturn(hot);                    // #4 hot 兜底
         when(fetchable.one()).thenReturn(Optional.of(Map.of("ids", Collections.emptyList())));
 
         List<Map<String, Object>> result = service.recommend(USER_ID, 10);
@@ -159,8 +160,8 @@ class RecommendServiceTest {
         // 内容召回的剧本在前，热门补齐在后（1 + 9 条热门）
         assertThat(result.get(0).get("scriptId")).isEqualTo(1L);
         assertThat(result.get(1).get("scriptId")).isEqualTo(100L);
-        // 确认共 4 次图查询：content / cf / 已玩剧本集合 / hot 兜底
-        verify(neo4jClient, times(4)).query(anyString());
+        // 确认共 5 次图查询：content / charContent / cf / 已玩剧本集合 / hot 兜底
+        verify(neo4jClient, times(5)).query(anyString());
     }
 
     @Test
@@ -172,9 +173,10 @@ class RecommendServiceTest {
                 record(101, "未玩过", "机制", 9));   // 未玩 → 应补入
         when(valueOps.get("rec:" + USER_ID)).thenReturn(null);
         when(fetchable.all())
-                .thenReturn(content)
-                .thenReturn(Collections.emptyList())
-                .thenReturn(hot);
+                .thenReturn(content)                 // #1 content
+                .thenReturn(Collections.emptyList()) // #2 charContent（空）
+                .thenReturn(Collections.emptyList()) // #3 cf（空）
+                .thenReturn(hot);                    // #4 hot 兜底
         // 用户已玩剧本 id 集合 = {100}
         when(fetchable.one()).thenReturn(Optional.of(Map.of("ids", List.of(100L))));
 
@@ -256,10 +258,11 @@ class RecommendServiceTest {
 
         assertThat(result).hasSize(2);
         assertThat(result.get(0).get("scriptId")).isEqualTo(23L);
-        verify(runnable).bind(150L);
-        verify(ongoingBind).to("sid");
-        verify(runnable).bind(6);
-        verify(ongoingBind).to("lim");
+        // similar() 内部两条查询（RELATED_TO 关联 + 同作者）各绑定一次 scriptId → to("sid") 也是两次
+        verify(runnable, times(2)).bind(150L);
+        verify(ongoingBind, times(2)).to("sid");
+        // 注意：limit 不下推到 Cypher，而是 Java 侧对合并结果截断（RecommendService#similar 末尾 .limit(limit)），
+        // 因此不再校验 bind(limit) / to("lim")。
     }
 
     @Test

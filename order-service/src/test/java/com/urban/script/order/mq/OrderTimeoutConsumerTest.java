@@ -5,6 +5,7 @@ import com.rabbitmq.client.Channel;
 import com.urban.script.order.entity.OrderInfo;
 import com.urban.script.order.mapper.OrderMapper;
 import com.urban.script.order.mapper.SessionMapper;
+import com.urban.script.order.service.MqDedupService;
 import com.urban.script.order.service.StockService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,11 +28,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * OrderTimeoutConsumer 单元测试 —— 超时关单消费者幂等性
+ * OrderTimeoutConsumer 单元测试 —— 超时关单"双重幂等"
  *
- * <p>核心断言（面试可讲）：
+ * <p>核心断言（双重幂等）：
  * <ul>
- *   <li>关键幂等：{@code updateStatusAndCancelReason ... WHERE status=0} 返回 0 行
+ *   <li>消息级幂等：去重表 {@code tryConsume} 返回 false（同一条消息重复投递）
+ *       → ACK 跳过，不进业务逻辑</li>
+ *   <li>业务级幂等：{@code updateStatusAndCancelReason ... WHERE status=0} 返回 0 行
  *       = 订单已被其他路径（支付 / 手动取消 / 场次关闭）处理 → ACK 跳过，<b>绝不回滚库存</b></li>
  *   <li>订单不存在 / 消息体缺 orderNo → ACK 丢弃，不留死信</li>
  *   <li>正常关单 → Redis(Lua) + MySQL booked 双回滚 + ACK</li>
@@ -52,6 +55,8 @@ class OrderTimeoutConsumerTest {
     private SessionMapper sessionMapper;
     @Mock
     private StockService stockService;
+    @Mock
+    private MqDedupService mqDedupService;
 
     private OrderTimeoutConsumer consumer;
     private Channel channel;
@@ -59,7 +64,8 @@ class OrderTimeoutConsumerTest {
     @BeforeEach
     void setUp() {
         // ObjectMapper 用真实实现，保证 JSON 解析行为与生产一致
-        consumer = new OrderTimeoutConsumer(orderMapper, sessionMapper, stockService, new ObjectMapper());
+        consumer = new OrderTimeoutConsumer(orderMapper, sessionMapper, stockService,
+                new ObjectMapper(), mqDedupService);
         channel = mock(Channel.class);
     }
 
@@ -89,6 +95,35 @@ class OrderTimeoutConsumerTest {
         return order;
     }
 
+    /**
+     * 消息级幂等放行：视为"首次消费"（未命中去重表）
+     *
+     * <p>只给需要走到业务逻辑的用例调用；缺 orderNo / 非法 JSON 的用例在
+     * 去重之前就 return 了，调用它会触发 Mockito 严格模式的 UnnecessaryStubbing。
+     */
+    private void givenFirstConsume() {
+        when(mqDedupService.tryConsume(anyString(), anyString())).thenReturn(true);
+    }
+
+    // ========================================================================
+    // 用例 ⓪ —— 消息级幂等：去重表命中（同一条消息重复投递）
+    // ========================================================================
+
+    @Test
+    @DisplayName("消息级幂等：去重表已存在该消息 → ACK 跳过且不进业务逻辑")
+    void handleTimeout_shouldAckAndSkip_whenMessageAlreadyConsumed() throws Exception {
+        // 去重表 INSERT 撞唯一键 → tryConsume 返回 false
+        when(mqDedupService.tryConsume(anyString(), anyString())).thenReturn(false);
+
+        consumer.handleTimeout(msg(timeoutBody("ORD_TIMEOUT_1")), channel);
+
+        verify(channel).basicAck(DELIVERY_TAG, false);
+        // 去重拦截后不应再查库、不应回滚库存
+        verify(orderMapper, never()).selectByOrderNo(anyString());
+        verify(stockService, never()).rollbackStock(anyLong(), anyInt());
+        verify(channel, never()).basicNack(anyLong(), eq(false), eq(false));
+    }
+
     // ========================================================================
     // 用例 ① —— 幂等核心：订单已被支付/取消，绝不再回滚库存（P0）
     // ========================================================================
@@ -96,6 +131,7 @@ class OrderTimeoutConsumerTest {
     @Test
     @DisplayName("幂等：订单已被处理（UPDATE 返回 0 行）→ ACK 跳过且不回滚库存")
     void handleTimeout_shouldAckAndSkip_whenOrderAlreadyProcessed() throws Exception {
+        givenFirstConsume();
         OrderInfo order = pendingOrder();
         when(orderMapper.selectByOrderNo("ORD_TIMEOUT_1")).thenReturn(order);
         // 模拟竞态：select 时还是待支付，但 UPDATE ... WHERE status=0 时已被支付回调抢先改为 1
@@ -117,6 +153,7 @@ class OrderTimeoutConsumerTest {
     @Test
     @DisplayName("订单不存在 → ACK 跳过（不留死信）")
     void handleTimeout_shouldAck_whenOrderNotFound() throws Exception {
+        givenFirstConsume();
         when(orderMapper.selectByOrderNo("ORD_GONE")).thenReturn(null);
 
         consumer.handleTimeout(msg(timeoutBody("ORD_GONE")), channel);
@@ -142,6 +179,7 @@ class OrderTimeoutConsumerTest {
     @Test
     @DisplayName("正常关单：原子更新 1 行 → Redis + MySQL booked 双回滚 + ACK")
     void handleTimeout_shouldRollbackAndAck_whenClosed() throws Exception {
+        givenFirstConsume();
         OrderInfo order = pendingOrder();
         when(orderMapper.selectByOrderNo("ORD_TIMEOUT_1")).thenReturn(order);
         when(orderMapper.updateStatusAndCancelReason("ORD_TIMEOUT_1", 2, "TIMEOUT")).thenReturn(1);
@@ -161,6 +199,7 @@ class OrderTimeoutConsumerTest {
     @Test
     @DisplayName("Redis 回滚异常 → 降级记 WARN，MySQL 兜底回滚且仍 ACK")
     void handleTimeout_shouldStillRollbackMysql_whenRedisDown() throws Exception {
+        givenFirstConsume();
         OrderInfo order = pendingOrder();
         when(orderMapper.selectByOrderNo("ORD_TIMEOUT_1")).thenReturn(order);
         when(orderMapper.updateStatusAndCancelReason("ORD_TIMEOUT_1", 2, "TIMEOUT")).thenReturn(1);
